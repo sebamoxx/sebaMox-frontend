@@ -1013,7 +1013,7 @@ export default function Software3DEngine() {
 
 
   return (
-    <div ref={pageRef} style={{ background: C.bgDeep, minHeight: '100vh', color: C.text }}>
+    <div ref={pageRef} style={{ background: C.bgDeep, minHeight: '100svh', color: C.text }}>
       <style>{CSS}</style>
 
       {/* ══ GRAIN OVERLAY (fisso, pointer-events:none) ══ */}

@@ -743,7 +743,7 @@ export default function WorksArchive() {
       className="zg-section"
       style={{
         position: 'relative',
-        height: `${N * 120}vh`, // spazio di scroll reale → Lenis-friendly
+        height: `${N * 120}svh`, // spazio di scroll reale → Lenis-friendly
         background: T.void,
         fontFamily: MONO,
       }}
@@ -820,8 +820,8 @@ export default function WorksArchive() {
         .zg-camera {
           position: sticky;
           top: 0;
-          height: 100vh;
-          height: 100dvh;
+          height: 100svh;
+          height: 100svh;
           overflow: hidden;
         }
 
@@ -886,7 +886,7 @@ export default function WorksArchive() {
           padding: clamp(1.1rem, 2vw, 1.7rem);
           display: flex;
           flex-direction: column;
-          gap: clamp(0.7rem, 1.4vh, 1rem);
+          gap: clamp(0.7rem, 1.4svh, 1rem);
         }
 
         .zg-card-head {
@@ -1141,7 +1141,7 @@ export default function WorksArchive() {
 
         .zg-hint {
           position: absolute;
-          bottom: clamp(1.2rem, 4vh, 2.4rem);
+          bottom: clamp(1.2rem, 4svh, 2.4rem);
           left: 50%;
           transform: translateX(-50%);
           z-index: 10;

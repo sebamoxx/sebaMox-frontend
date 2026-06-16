@@ -119,7 +119,7 @@ function CellulaCore({ reduced }) {
         left: '50%',
         // ALTEZZA/LARGHEZZA FISSE + absolute (fuori dal flow) → zero layout shift.
         width: 'min(92vw, 1100px)',
-        height: 'min(92vh, 1100px)',
+        height: 'min(92svh, 1100px)',
         transform: 'translate(-50%, -50%)',
         zIndex: Z_INDEX,
         pointerEvents: 'none', // non interferisce mai con scroll/click

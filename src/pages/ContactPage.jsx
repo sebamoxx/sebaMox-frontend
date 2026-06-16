@@ -38,7 +38,7 @@ const STYLES = `
   .cp-root {
     position: relative;
     width: 100%;
-    min-height: 100vh;
+    min-height: 100svh;
     background: ${C.bg};
     display: grid;
     grid-template-columns: 55fr 45fr;

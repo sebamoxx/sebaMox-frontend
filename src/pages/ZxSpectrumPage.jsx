@@ -367,7 +367,7 @@ export default function ZxSpectrumPage() {
       <main ref={pageRef} style={{
         background: C.bgDeep,
         color: C.text,
-        minHeight: '100vh',
+        minHeight: '100svh',
         padding: 'clamp(1.5rem, 4vw, 5rem)',
         overflowX: 'hidden',
       }}>

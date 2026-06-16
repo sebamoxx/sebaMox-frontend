@@ -395,7 +395,7 @@ export default function FAQ() {
         backgroundColor: C.bg,
         borderTop: `1px solid ${C.hair}`,
         overflow: 'hidden',
-        padding: 'clamp(4rem, 10vh, 10rem) 0',
+        padding: 'clamp(4rem, 10svh, 10rem) 0',
         zIndex: 5,
       }}
     >
@@ -425,7 +425,7 @@ export default function FAQ() {
       {/* WATERMARK */}
       <div className="hide-mobile" aria-hidden="true" style={{
         position: 'absolute',
-        top: 'clamp(2rem, 4vh, 4rem)', right: 'clamp(2.5rem, 6vw, 6rem)',
+        top: 'clamp(2rem, 4svh, 4rem)', right: 'clamp(2.5rem, 6vw, 6rem)',
         zIndex: 1, pointerEvents: 'none',
         fontFamily: MONO, fontWeight: 700,
         fontSize: 'clamp(5rem, 10vw, 12rem)',
@@ -445,7 +445,7 @@ export default function FAQ() {
         {/* ── HEADER ──────────────────────────────────────── */}
         <div
           ref={headRef}
-          style={{ marginBottom: 'clamp(3rem, 7vh, 6rem)', position: 'relative', zIndex: 10 }}
+          style={{ marginBottom: 'clamp(3rem, 7svh, 6rem)', position: 'relative', zIndex: 10 }}
         >
           <p style={{
             display: 'flex', alignItems: 'center', gap: '1rem',

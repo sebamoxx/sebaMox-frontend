@@ -282,7 +282,7 @@ export default function ScrubbingWatchHero() {
       window.removeEventListener("resize", resizeCanvas); //[cite: 3]
       if (sectionRef.current) {
         sectionRef.current.style.position = 'relative';
-        sectionRef.current.style.height = '100vh';
+        sectionRef.current.style.height = '100svh';
       }
     };
   }, []);
@@ -301,7 +301,7 @@ export default function ScrubbingWatchHero() {
     section: {
       position: "relative", //[cite: 3]
       width: "100%", //[cite: 3]
-      height: "100vh", //[cite: 3]
+      height: "100svh", //[cite: 3]
       background: colors.dark, //[cite: 3]
       overflow: "hidden", //[cite: 3]
     },
@@ -334,7 +334,7 @@ export default function ScrubbingWatchHero() {
       letterSpacing: "0.5em",
       textTransform: "uppercase", //[cite: 3]
       color: colors.gold,
-      marginBottom: "clamp(1rem, 2.5vh, 2rem)", //[cite: 3]
+      marginBottom: "clamp(1rem, 2.5svh, 2rem)", //[cite: 3]
     },
     h1: {
       fontFamily: "'Cormorant Garamond', serif",
@@ -353,7 +353,7 @@ export default function ScrubbingWatchHero() {
       letterSpacing: "0.25em",
       textTransform: "uppercase", //[cite: 3]
       color: colors.subtle,
-      marginTop: "clamp(1.5rem, 4vh, 3rem)",
+      marginTop: "clamp(1.5rem, 4svh, 3rem)",
     },
     /* ACT II */
     opticsBlock: {
@@ -375,7 +375,7 @@ export default function ScrubbingWatchHero() {
       margin: 0, //[cite: 3]
     },
     specList: {
-      marginTop: "clamp(2rem, 4vh, 3.5rem)",
+      marginTop: "clamp(2rem, 4svh, 3.5rem)",
       display: "flex", //[cite: 3]
       flexDirection: "column", //[cite: 3]
       gap: "1.2em",
@@ -395,7 +395,7 @@ export default function ScrubbingWatchHero() {
     /* ACT III */
     ctaBlock: {
       position: "absolute", //[cite: 3]
-      bottom: "clamp(3rem, 9vh, 7rem)", //[cite: 3]
+      bottom: "clamp(3rem, 9svh, 7rem)", //[cite: 3]
       left: "50%", //[cite: 3]
       transform: "translateX(-50%)", //[cite: 3]
       textAlign: "center", //[cite: 3]
@@ -423,7 +423,7 @@ export default function ScrubbingWatchHero() {
     /* HUD */
     hud: {
       position: "absolute", //[cite: 3]
-      bottom: "clamp(1rem, 3vh, 2.5rem)",
+      bottom: "clamp(1rem, 3svh, 2.5rem)",
       left: "clamp(1rem, 3vw, 3rem)",
       display: "flex", //[cite: 3]
       flexDirection: "column", //[cite: 3]
@@ -453,7 +453,7 @@ export default function ScrubbingWatchHero() {
     },
     scrollHint: {
       position: "absolute", //[cite: 3]
-      bottom: "clamp(1rem, 3vh, 2.5rem)",
+      bottom: "clamp(1rem, 3svh, 2.5rem)",
       right: "clamp(1rem, 3vw, 3rem)",
       fontFamily: "'Montserrat', sans-serif",
       fontWeight: 300,
@@ -516,8 +516,8 @@ export default function ScrubbingWatchHero() {
           color: ${colors.dark};
           background: ${colors.platinum};
           border: 1px solid ${colors.platinum};
-          padding: clamp(1rem, 2.5vh, 1.4rem) clamp(2.5rem, 5vw, 4.5rem);
-          margin-top: clamp(2rem, 5vh, 3.5rem);
+          padding: clamp(1rem, 2.5svh, 1.4rem) clamp(2.5rem, 5vw, 4.5rem);
+          margin-top: clamp(2rem, 5svh, 3.5rem);
           cursor: pointer;
           display: inline-flex;
           align-items: center;
@@ -545,8 +545,8 @@ export default function ScrubbingWatchHero() {
         }
 
         /* dvh where supported — prevents iOS Safari viewport jump */
-        @supports (height: 100dvh) {
-          .aeon-hero-section { height: 100dvh !important; }
+        @supports (height: 100svh) {
+          .aeon-hero-section { height: 100svh !important; }
         }
 
         /* Mobile portrait refinements */
@@ -574,7 +574,7 @@ export default function ScrubbingWatchHero() {
         }
           .aeon-back-link {
           position: absolute;
-          top: clamp(1.5rem, 4vh, 3rem);
+          top: clamp(1.5rem, 4svh, 3rem);
           left: clamp(1.5rem, 4vw, 3rem);
           font-family: 'Montserrat', sans-serif;
           font-weight: 300;

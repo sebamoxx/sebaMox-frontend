@@ -572,7 +572,7 @@ export default function KineticCanvas() {
       style={{
         position: 'relative',
         width: '100%',
-        height: 'clamp(400px, 60vh, 600px)',
+        height: 'clamp(400px, 60svh, 600px)',
         background: '#030201',
         overflow: 'hidden',
       }}

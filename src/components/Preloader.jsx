@@ -1005,10 +1005,10 @@ export default function Preloader({ onComplete }) {
       {/* ── PANNELLO INFERIORE: counter + logs ──────────────── */}
       <div style={{
         position: 'absolute', left: 0, right: 0, bottom: 0,
-        padding: `0 ${PX} clamp(1.4rem, 4vh, 3rem)`,
+        padding: `0 ${PX} clamp(1.4rem, 4svh, 3rem)`,
         boxSizing: 'border-box',
         display: 'flex', flexDirection: 'column',
-        gap: 'clamp(0.9rem, 3vh, 1.6rem)',
+        gap: 'clamp(0.9rem, 3svh, 1.6rem)',
         zIndex: 10,
       }}>
 
@@ -1054,7 +1054,7 @@ export default function Preloader({ onComplete }) {
             ref={logsBoxRef}
             style={{
               flex: '0 1 380px', minWidth: 0,
-              height: 'clamp(96px, 20vh, 168px)',
+              height: 'clamp(96px, 20svh, 168px)',
               overflow: 'hidden',
               display: 'flex', flexDirection: 'column', justifyContent: 'flex-end',
               gap: '0.42rem',
@@ -1105,9 +1105,9 @@ export default function Preloader({ onComplete }) {
         /* ── VIEWPORT HEIGHT ──────────────────────────────────
            100dvh segue la URL bar di iOS Safari (15.4+).
            Fallback: --real-vh calcolata via JS per i legacy. */
-        .uplink-pre { height: 100dvh; }
-        @supports not (height: 1dvh) {
-          .uplink-pre { height: var(--real-vh, 100vh); }
+        .uplink-pre { height: 100svh; }
+        @supports not (height: 1svh) {
+          .uplink-pre { height: var(--real-vh, 100svh); }
         }
 
         /* ── MOBILE COLLAPSE ──────────────────────────────────
@@ -1122,7 +1122,7 @@ export default function Preloader({ onComplete }) {
           }
           .uplink-row > div:last-child {
             flex: 0 0 auto !important;
-            height: clamp(80px, 16vh, 120px) !important;
+            height: clamp(80px, 16svh, 120px) !important;
             border-left: none !important;
             border-top: 1px solid ${T.hairline} !important;
             padding-left: 0 !important;

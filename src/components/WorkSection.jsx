@@ -403,7 +403,7 @@ export default function WorkSection({
         /* ═══ ALTEZZA — STRATEGIA BIFORCATA ══════════════════════
            DESKTOP (≥768px): esperienza full-screen. Catena di
            fallback (l'ultima supportata vince):
-           1. 100vh → 2. --real-vh (iOS<15.4) → 3. 100svh → 4. 100dvh
+           1. 100vh → 2. --real-vh (iOS<15.4) → 3. 100svh → 4. 100svh
 
            MOBILE (<768px): NIENTE altezza forzata del viewport —
            la sezione è alta quanto il suo contenuto (scritta +
@@ -415,15 +415,15 @@ export default function WorkSection({
           flex-direction: column;
         }
         @media (min-width: 768px) {
-          .xr-section { min-height: 100vh; }
-          @supports not (height: 1dvh) {
-            .xr-section { min-height: var(--real-vh, 100vh); }
+          .xr-section { min-height: 100svh; }
+          @supports not (height: 1svh) {
+            .xr-section { min-height: var(--real-vh, 100svh); }
           }
           @supports (min-height: 100svh) {
             .xr-section { min-height: 100svh; }
           }
-          @supports (min-height: 100dvh) {
-            .xr-section { min-height: 100dvh; }
+          @supports (min-height: 100svh) {
+            .xr-section { min-height: 100svh; }
           }
         }
 
@@ -531,8 +531,8 @@ export default function WorkSection({
           flex-direction: column;
           align-items: center;
           justify-content: center;
-          gap: clamp(2rem, 6vh, 3.4rem);
-          padding: clamp(4rem, 10vh, 6rem) clamp(0.85rem, 4vw, 3rem);
+          gap: clamp(2rem, 6svh, 3.4rem);
+          padding: clamp(4rem, 10svh, 6rem) clamp(0.85rem, 4vw, 3rem);
           box-sizing: border-box;
           pointer-events: none; /* riattivati solo sulla CTA */
         }

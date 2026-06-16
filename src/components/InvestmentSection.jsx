@@ -313,7 +313,7 @@ export default function InvestmentSection() {
           background: ${C.bg};
           color: ${C.txt};
           font-family: 'Outfit', sans-serif;
-          padding: clamp(5rem, 13vh, 12rem) 0 clamp(4rem, 9vh, 8rem);
+          padding: clamp(5rem, 13svh, 12rem) 0 clamp(4rem, 9svh, 8rem);
           overflow: hidden;
         }
         .inv-rails { position: absolute; inset: 0; pointer-events: none; }
@@ -338,7 +338,7 @@ export default function InvestmentSection() {
         .inv-head-meta {
           display: flex; justify-content: space-between; flex-wrap: wrap;
           gap: 1rem;
-          margin-bottom: clamp(2rem, 5vh, 4rem);
+          margin-bottom: clamp(2rem, 5svh, 4rem);
         }
         .inv-title {
           margin: 0; padding: 0;
@@ -352,7 +352,7 @@ export default function InvestmentSection() {
         .inv-title-line { display: inline-block; will-change: transform; }
         .inv-title em { font-style: normal; color: ${C.acc}; }
         .inv-intro {
-          margin: clamp(1.4rem, 3vh, 2.6rem) 0 clamp(2rem, 4.5vh, 4rem);
+          margin: clamp(1.4rem, 3svh, 2.6rem) 0 clamp(2rem, 4.5svh, 4rem);
           max-width: 52ch;
           margin-left: auto;
           font-size: clamp(0.92rem, 1.15vw, 1.1rem);
@@ -375,7 +375,7 @@ export default function InvestmentSection() {
           grid-template-columns: clamp(4.5rem, 8vw, 8rem) 1.35fr 1fr clamp(11rem, 17vw, 16rem);
           gap: clamp(1.2rem, 2.5vw, 2.8rem);
           align-items: start;
-          padding: clamp(2rem, 5vh, 4rem) 0;
+          padding: clamp(2rem, 5svh, 4rem) 0;
           transition: background-color 0.45s cubic-bezier(0.22, 1, 0.36, 1);
         }
         @media (hover: hover) and (pointer: fine) {
@@ -403,7 +403,7 @@ export default function InvestmentSection() {
           color: ${C.txt};
         }
         .inv-row-audience {
-          margin: clamp(0.8rem, 1.6vh, 1.3rem) 0 0;
+          margin: clamp(0.8rem, 1.6svh, 1.3rem) 0 0;
           max-width: 34ch;
           font-size: clamp(0.84rem, 1vw, 0.98rem);
           line-height: 1.65; color: ${C.mut};
@@ -460,7 +460,7 @@ export default function InvestmentSection() {
         .inv-row-arrow {
           font-size: clamp(1.3rem, 2.2vw, 2.1rem);
           color: ${C.dim}; line-height: 1;
-          margin-top: clamp(0.6rem, 1.4vh, 1.1rem);
+          margin-top: clamp(0.6rem, 1.4svh, 1.1rem);
           transition: transform 0.45s cubic-bezier(0.22, 1, 0.36, 1), color 0.35s ease;
         }
 
@@ -471,7 +471,7 @@ export default function InvestmentSection() {
           grid-template-columns: 1fr auto;
           align-items: center;
           gap: clamp(1.5rem, 4vw, 4rem);
-          padding: clamp(2rem, 5vh, 4rem) 0 0;
+          padding: clamp(2rem, 5svh, 4rem) 0 0;
         }
         .inv-ctablock-copy { display: flex; flex-direction: column; gap: clamp(0.9rem, 2vh, 1.4rem); }
         .inv-ctablock-text {
@@ -513,15 +513,15 @@ export default function InvestmentSection() {
           }
           .inv-col-index { grid-area: idx; }
           .inv-col-main { grid-area: main; }
-          .inv-col-features { grid-area: feat; margin-top: clamp(1rem, 2.5vh, 1.6rem); }
+          .inv-col-features { grid-area: feat; margin-top: clamp(1rem, 2.5svh, 1.6rem); }
           .inv-col-price { grid-area: price; }
         }
         @media (max-width: 768px) {
           .inv-row-grid {
             grid-template-columns: 1fr;
             grid-template-areas: none;
-            gap: clamp(1.1rem, 3vh, 1.6rem);
-            padding: clamp(1.8rem, 4.5vh, 2.6rem) 0;
+            gap: clamp(1.1rem, 3svh, 1.6rem);
+            padding: clamp(1.8rem, 4.5svh, 2.6rem) 0;
           }
           .inv-col-index, .inv-col-main, .inv-col-features, .inv-col-price { grid-area: auto; }
           .inv-col-index { flex-direction: row; align-items: baseline; gap: 0.9rem; }
@@ -530,7 +530,7 @@ export default function InvestmentSection() {
             flex-direction: row; align-items: baseline; justify-content: space-between;
             text-align: left; width: 100%;
             border-top: 1px solid ${C.hair};
-            padding-top: clamp(0.9rem, 2vh, 1.3rem);
+            padding-top: clamp(0.9rem, 2svh, 1.3rem);
           }
           .inv-price-label { display: none; }
           .inv-row-arrow { margin-top: 0; }

@@ -513,10 +513,10 @@ export default function BrutalistManifesto() {
       <div
         className="m-header-bar"
         style={{
-          paddingTop: 'clamp(3rem, 8vh, 6rem)',
+          paddingTop: 'clamp(3rem, 8svh, 6rem)',
           paddingLeft: 'clamp(2rem, 5vw, 4rem)',
           paddingRight: 'clamp(2rem, 5vw, 4rem)',
-          paddingBottom: 'clamp(1.5rem, 3vh, 2.5rem)',
+          paddingBottom: 'clamp(1.5rem, 3svh, 2.5rem)',
           display: 'flex', justifyContent: 'space-between', alignItems: 'center',
           borderBottom: `1px solid ${C.hair}`,
           marginBottom: 0,
@@ -604,7 +604,7 @@ export default function BrutalistManifesto() {
           <div className="m-title-meta" style={{
             display: 'flex', alignItems: 'center', gap: 'clamp(0.8rem, 2vw, 2rem)',
             paddingLeft: '0.1em',
-            marginTop: 'clamp(0.5rem, 1.2vh, 1rem)',
+            marginTop: 'clamp(0.5rem, 1.2svh, 1rem)',
           }}>
             <span style={{
               fontFamily: MONO, fontSize: 'clamp(0.55rem, 0.75vw, 0.7rem)',
@@ -1008,7 +1008,7 @@ export default function BrutalistManifesto() {
             max-width: 1440px; margin: 0 auto;
             padding-left:  clamp(2rem, 5vw, 4rem);
             padding-right: clamp(2rem, 5vw, 4rem);
-            padding-bottom: clamp(5rem, 12vh, 9rem);
+            padding-bottom: clamp(5rem, 12svh, 9rem);
             display: grid;
             grid-template-columns: repeat(12, 1fr);
             grid-template-rows: auto auto;
@@ -1064,7 +1064,7 @@ export default function BrutalistManifesto() {
             flex-direction: column;
             padding-left:   clamp(1.25rem, 5vw, 2rem);
             padding-right:  clamp(1.25rem, 5vw, 2rem);
-            padding-bottom: clamp(2.5rem, 8vh, 5rem);
+            padding-bottom: clamp(2.5rem, 8svh, 5rem);
             gap: 0;
           }
 
