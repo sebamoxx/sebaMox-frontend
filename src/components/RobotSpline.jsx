@@ -131,7 +131,7 @@ function RobotSplineBase({
       }, 2000); 
     };
 
-    const intervalId = setInterval(triggerMobileHeartbeat, 6000);
+    const intervalId = setInterval(triggerMobileHeartbeat, 4500);
 
     return () => {
       clearInterval(intervalId);
