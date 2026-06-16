@@ -698,7 +698,7 @@ export default function TechStack() {
           position: 'relative',
           maxWidth: '900px',
           width: '100%',
-          height: 'clamp(400px, 60svh, 550px)',
+          height: '500px',
           margin: '0 auto',
           background:
             'linear-gradient(180deg, rgba(255,255,255,0.02) 0%, rgba(255,255,255,0.005) 100%)',
