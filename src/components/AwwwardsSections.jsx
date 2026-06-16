@@ -169,7 +169,7 @@ function useMagnetic(power = 0.45) {
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   SEZIONE 1 — SERVICES BENTO
+   SEZIONE 1 — SERVICES BENTO (ULTRA-PREMIUM ISOMETRIC 3D)
 ═══════════════════════════════════════════════════════════════ */
 const SERVICES = [
   {
@@ -219,7 +219,7 @@ function ServiceCard({ service }) {
         display: 'flex',
         flexDirection: 'column',
         backdropFilter: 'blur(8px)',
-        transition: 'border-color 0.4s ease, transform 0.4s cubic-bezier(0.16,1,0.3,1)',
+        transition: 'border-color 0.5s ease, transform 0.5s cubic-bezier(0.16,1,0.3,1)',
       }}
     >
       {corners.map((pos, i) => (
@@ -231,7 +231,7 @@ function ServiceCard({ service }) {
       <div className="bento-glow" style={{
         position: 'absolute', inset: 0, zIndex: 0, pointerEvents: 'none',
         background: `radial-gradient(550px circle at var(--mx, -999px) var(--my, -999px), rgba(244,162,97,0.07), transparent 45%)`,
-        opacity: 0, transition: 'opacity 0.35s ease',
+        opacity: 0, transition: 'opacity 0.4s ease',
       }} />
 
       <div style={{ position: 'relative', zIndex: 1, flex: 1, display: 'flex', flexDirection: 'column' }}>
@@ -240,7 +240,7 @@ function ServiceCard({ service }) {
           color: service.accent, lineHeight: 1,
           marginBottom: isLarge ? '2.5rem' : '1.5rem',
           display: 'inline-block',
-          transition: 'transform 0.4s ease',
+          transition: 'transform 0.5s cubic-bezier(0.16,1,0.3,1)',
         }}>
           {service.icon}
         </span>
@@ -256,13 +256,58 @@ function ServiceCard({ service }) {
         <p style={{
           fontFamily: FONT,
           fontSize: isLarge ? 'clamp(0.9rem, 1.2vw, 1.05rem)' : '0.875rem',
-          color: C.muted, lineHeight: 1.7, flex: 1, margin: 0,
+          color: C.muted, lineHeight: 1.7, margin: 0,
         }}>
           {service.sub}
         </p>
 
+        {/* ── IL CORE 3D ISOMETRICO (Masterpiece) ── */}
+        {isLarge && (
+          <div className="iso-container" style={{
+            flex: 1,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            width: '100%',
+            minHeight: '180px',
+            marginTop: '2rem',
+            marginBottom: '1rem',
+            perspective: '1200px', /* La profondità della camera 3D */
+            pointerEvents: 'none',
+          }}>
+            <div className="iso-world">
+              {/* Le connessioni verticali (invisibili fino all'hover) */}
+              <div className="iso-data-beam left" />
+              <div className="iso-data-beam right" />
+              <div className="iso-data-stream" />
+
+              {/* Livello 1: DATABASE / SERVER */}
+              <div className="iso-layer iso-bot">
+                <span className="iso-label">[ SERVER_DB ]</span>
+                <div className="iso-grid" />
+              </div>
+
+              {/* Livello 2: CORE API */}
+              <div className="iso-layer iso-mid">
+                <span className="iso-label">[ LOGIC_API ]</span>
+                <div className="iso-core-pulse" />
+              </div>
+
+              {/* Livello 3: FRONTEND */}
+              <div className="iso-layer iso-top">
+                <span className="iso-label">[ UI_CLIENT ]</span>
+                <div className="iso-scanner" />
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Padding automatico per le card piccole */}
+        {!isLarge && <div style={{ flex: 1 }} />}
+
+        {/* ── TAGS ── */}
         {isLarge && service.tags && (
-          <div style={{ display: 'flex', gap: '0.4rem', marginTop: '2.5rem', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', gap: '0.4rem', marginTop: 'auto', flexWrap: 'wrap' }}>
             {service.tags.map(t => (
               <span key={t} style={{
                 fontFamily: MONO, fontSize: '0.58rem', fontWeight: 600, color: service.accent,
@@ -290,9 +335,6 @@ function ServicesSection() {
       <style>{`
         /* ════════════════════════════════════════════════════
            SERVICES GRID — 3 BREAKPOINTS
-           Mobile:  1 col, aspect-ratio (fix spazio nero)
-           Tablet:  2 col, web card full-width
-           Desktop: 2fr|1fr|1fr, web card colonna verticale
         ════════════════════════════════════════════════════ */
 
         .services-grid {
@@ -302,45 +344,22 @@ function ServicesSection() {
           grid-auto-rows: auto;
         }
 
-        /* ── MOBILE: aspect-ratio per ogni card → zero spazio vuoto ── */
         @media (max-width: 767px) {
-          .services-grid > * {
-            aspect-ratio: 4 / 3;
-          }
-          /* La card large è più alta delle altre */
-          .services-grid > :nth-child(1) {
-            aspect-ratio: 3 / 2;
-          }
+          .services-grid > * { aspect-ratio: 4 / 3; }
+          .services-grid > :nth-child(1) { aspect-ratio: 3 / 2; }
           .services-glow { display: none; }
+          .iso-container { display: none !important; } /* Nascondiamo il 3D su mobile per performance/spazio */
         }
 
-        /* ── TABLET: 2 colonne, web full-width ── */
         @media (min-width: 768px) and (max-width: 1023px) {
           .services-grid {
             grid-template-columns: repeat(2, 1fr);
             grid-auto-rows: auto;
           }
-          /* Web card prende tutta la riga */
-          .services-grid > :nth-child(1) {
-            grid-column: span 2;
-            min-height: 300px;
-          }
-          /* Le altre 5 si distribuiscono da sola */
-          .services-grid > :not(:nth-child(1)) {
-            min-height: 220px;
-          }
+          .services-grid > :nth-child(1) { grid-column: span 2; min-height: 300px; }
+          .services-grid > :not(:nth-child(1)) { min-height: 220px; }
         }
 
-        /* ── DESKTOP: bento asimmetrico brutale ─────────────────────
-           Layout:
-           col →    [  2fr – WEB  ] [ 1fr ] [ 1fr ]
-           row 1:   [ web          ] [ecom ] [land ]  260px
-           row 2:   [ web          ] [app  ] [brand]  260px
-           row 3:   [ web          ] [seo        ]   180px
-
-           Web: colonna sinistra dominante 50% × 100% altezza.
-           Seo: span 2 cols in fondo come fascia conclusiva.
-        ──────────────────────────────────────────────────────────── */
         @media (min-width: 1024px) {
           .services-grid {
             grid-template-columns: 2fr 1fr 1fr;
@@ -351,45 +370,150 @@ function ServicesSection() {
               "web  app   brand"
               "web  seo   seo";
           }
-
-          /* Named area per ogni card tramite nth-child */
           .services-grid > :nth-child(1) { grid-area: web;   }
           .services-grid > :nth-child(2) { grid-area: ecom;  }
           .services-grid > :nth-child(3) { grid-area: land;  }
           .services-grid > :nth-child(4) { grid-area: app;   }
           .services-grid > :nth-child(5) { grid-area: brand; }
           .services-grid > :nth-child(6) { grid-area: seo;   }
-        }
 
-        /* ── Card hover: glow + lift ── */
-        .bento-card:hover {
-          border-color: rgba(244,162,97,0.45) !important;
-          transform: translateY(-2px);
-        }
-        .bento-card:hover .bento-glow {
-          opacity: 1 !important;
-        }
-        .bento-card:hover .bento-icon {
-          transform: scale(1.08);
-        }
-
-        /* Seo card in desktop: layout orizzontale
-           perché è larga 2/4 della griglia ma bassa 180px */
-        @media (min-width: 1024px) {
           .services-grid > :nth-child(6) {
             flex-direction: row;
             align-items: center;
             gap: 2rem;
           }
           .services-grid > :nth-child(6) .bento-icon {
-            margin-bottom: 0;
-            flex-shrink: 0;
+            margin-bottom: 0; flex-shrink: 0;
           }
         }
 
-        /* PERF: blur decorativo pesante → rimosso su mobile */
-        @media (max-width: 767px) {
-          .services-glow { display: none; }
+        /* ── INTERAZIONI CARD ── */
+        .bento-card:hover {
+          border-color: rgba(244,162,97,0.45) !important;
+          transform: translateY(-4px);
+          box-shadow: 0 20px 40px rgba(0,0,0,0.4);
+        }
+        .bento-card:hover .bento-glow { opacity: 1 !important; }
+        .bento-card:hover .bento-icon { transform: scale(1.1) translateY(-2px); }
+
+        /* ════════════════════════════════════════════════════
+           MAGIA CSS: IL MOTORE 3D ISOMETRICO
+        ════════════════════════════════════════════════════ */
+        
+        .iso-world {
+          position: relative;
+          width: 130px;
+          height: 130px;
+          transform-style: preserve-3d;
+          /* Prospettiva assonometrica perfetta */
+          transform: rotateX(60deg) rotateZ(-45deg);
+          transition: transform 0.8s cubic-bezier(0.16, 1, 0.3, 1);
+          animation: isoFloat 6s ease-in-out infinite;
+        }
+
+        /* Il contenitore che galleggia morbidamente */
+        @keyframes isoFloat {
+          0%, 100% { transform: rotateX(60deg) rotateZ(-45deg) translateZ(0px); }
+          50% { transform: rotateX(60deg) rotateZ(-45deg) translateZ(10px); }
+        }
+
+        /* I Piani (Layer) */
+        .iso-layer {
+          position: absolute;
+          inset: 0;
+          border: 1px solid rgba(244,162,97, 0.2);
+          background: rgba(244,162,97, 0.02);
+          backdrop-filter: blur(2px);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          transition: all 0.8s cubic-bezier(0.16, 1, 0.3, 1);
+          overflow: hidden;
+        }
+
+        /* Tipografia incisa sui piani */
+        .iso-label {
+          font-family: 'JetBrains Mono', monospace;
+          font-size: 0.55rem;
+          color: rgba(244,162,97, 0.4);
+          letter-spacing: 0.1em;
+          transform: rotateZ(90deg); /* Ruota il testo per leggerlo in prospettiva */
+          transition: color 0.5s;
+        }
+
+        /* Posizioni iniziali compresse */
+        .iso-bot { transform: translateZ(-20px); border-color: rgba(244,162,97, 0.1); }
+        .iso-mid { transform: translateZ(0px); }
+        .iso-top { transform: translateZ(20px); border-color: rgba(244,162,97, 0.3); }
+
+        /* ── GLI EFFETTI INTERNI DEI PIANI ── */
+        .iso-grid {
+          position: absolute; inset: 0;
+          background-image: linear-gradient(rgba(244,162,97, 0.1) 1px, transparent 1px),
+                            linear-gradient(90deg, rgba(244,162,97, 0.1) 1px, transparent 1px);
+          background-size: 10px 10px;
+        }
+        
+        .iso-core-pulse {
+          position: absolute; width: 30px; height: 30px;
+          border-radius: 50%; background: rgba(244,162,97, 0.2);
+          box-shadow: 0 0 20px rgba(244,162,97, 0.4);
+          animation: corePulse 2s infinite;
+        }
+        @keyframes corePulse { 0%, 100% { transform: scale(0.8); opacity: 0.5;} 50% { transform: scale(1.2); opacity: 1;} }
+
+        .iso-scanner {
+          position: absolute; top: 0; left: 0; width: 100%; height: 2px;
+          background: rgba(244,162,97, 0.8);
+          box-shadow: 0 0 10px rgba(244,162,97, 1);
+          animation: scan 3s linear infinite;
+        }
+        @keyframes scan { 0% { top: -10%; opacity: 0; } 10% { opacity: 1; } 90% { opacity: 1; } 100% { top: 110%; opacity: 0; } }
+
+        /* ── I RAGGI DI DATI (Invisibili all'inizio) ── */
+        .iso-data-beam {
+          position: absolute; width: 1px; height: 100px;
+          background: linear-gradient(to top, transparent, rgba(244,162,97,0.8), transparent);
+          transform-origin: bottom;
+          transform: rotateX(90deg) translateZ(65px) translateY(-50px) scaleY(0);
+          transition: transform 0.8s cubic-bezier(0.16, 1, 0.3, 1);
+          opacity: 0;
+        }
+        .iso-data-beam.left { left: 0; }
+        .iso-data-beam.right { right: 0; }
+
+        /* ── HOVER STATE: L'ESPLOSIONE ARCHITETTURALE ── */
+        .bento-card:hover .iso-world {
+          transform: rotateX(55deg) rotateZ(-35deg) scale(1.15); /* Ruota e zooma leggermente verso l'utente */
+          animation: none; /* Ferma il float per concentrarsi sulla struttura */
+        }
+        
+        /* I piani si allontanano sull'asse Z creando lo stack profondo */
+        .bento-card:hover .iso-bot { 
+          transform: translateZ(-50px); 
+          background: rgba(244,162,97, 0.05); 
+          border-color: rgba(244,162,97, 0.3); 
+          box-shadow: 0 0 30px rgba(244,162,97, 0.1);
+        }
+        .bento-card:hover .iso-mid { 
+          transform: translateZ(10px); 
+          background: rgba(244,162,97, 0.08); 
+          border-color: rgba(244,162,97, 0.5); 
+        }
+        .bento-card:hover .iso-top { 
+          transform: translateZ(70px); 
+          background: rgba(244,162,97, 0.12); 
+          border-color: rgba(244,162,97, 0.9); 
+          box-shadow: 0 0 40px rgba(244,162,97, 0.2);
+        }
+
+        /* I testi si accendono */
+        .bento-card:hover .iso-label { color: rgba(244,162,97, 1); }
+
+        /* I raggi si estendono per collegare i piani */
+        .bento-card:hover .iso-data-beam {
+          transform: rotateX(90deg) translateZ(65px) translateY(-50px) scaleY(1.2);
+          opacity: 1;
         }
       `}</style>
 
