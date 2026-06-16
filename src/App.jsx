@@ -40,9 +40,9 @@ ScrollTrigger.config({ ignoreMobileResize: true });
    Con ignoreMobileResize il jitter è risolto senza prendere il controllo dello
    scroll. Abilitalo SOLO se, dopo i test, il salto persiste — e solo su touch,
    ricontrollando che il drag della barra e i click funzionino ancora: */
-// if (window.matchMedia('(pointer: coarse)').matches) {
-//   ScrollTrigger.normalizeScroll(true);
-// }
+if (window.matchMedia('(pointer: coarse)').matches) {
+   ScrollTrigger.normalizeScroll(true);
+}
 
 /**
  * ╔══════════════════════════════════════════════════════════════╗
