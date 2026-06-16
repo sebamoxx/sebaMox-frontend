@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import './utils/consoleHijack'
 import { createRoot } from 'react-dom/client';
+import { HelmetProvider } from 'react-helmet-async';
 import './index.css';
 import App from './App.jsx';
 
@@ -228,4 +229,8 @@ function Root() {
   return <App />;
 }
 
-createRoot(document.getElementById('root')).render(<Root />);
+createRoot(document.getElementById('root')).render(
+  <HelmetProvider>
+    <Root />
+  </HelmetProvider>
+);

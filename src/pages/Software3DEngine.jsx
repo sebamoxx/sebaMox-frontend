@@ -2,6 +2,7 @@ import React, { useEffect, useRef } from 'react';
 import gsap from 'gsap';
 import { ScrollTrigger } from 'gsap/ScrollTrigger';
 import { Link } from 'react-router-dom';
+import { Helmet } from 'react-helmet-async';
 
 gsap.registerPlugin(ScrollTrigger);
 
@@ -1014,6 +1015,17 @@ export default function Software3DEngine() {
 
   return (
     <div ref={pageRef} style={{ background: C.bgDeep, minHeight: '100svh', color: C.text }}>
+      {/* ── SEO DINAMICA PER QUESTA PAGINA ── */}
+      <Helmet>
+        <title>Software 3D Engine | Seba Mollo</title>
+        <meta 
+          name="description" 
+          content="Un motore di rendering 3D CPU-only scritto in C puro. Esplora l'architettura matematica, le proiezioni prospettiche e la rasterizzazione senza l'ausilio di GPU." 
+        />
+        <meta property="og:title" content="Software 3D Engine | Ingegneria Grafica" />
+        <meta property="og:description" content="Nessuna libreria esterna. Nessuna scheda video. Solo C puro, matematica e un framebuffer. Guarda il case study." />
+        <meta property="og:image" content="/images/immagine3D.png" /> 
+      </Helmet>
       <style>{CSS}</style>
 
       {/* ══ GRAIN OVERLAY (fisso, pointer-events:none) ══ */}

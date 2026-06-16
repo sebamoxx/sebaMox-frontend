@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback, lazy, Suspense, useRef, memo } from 'react';
 import { BrowserRouter, Routes, Route, useLocation } from 'react-router-dom';
 import gsap from 'gsap';
+import { Helmet } from 'react-helmet-async';
 import { ScrollTrigger } from 'gsap/ScrollTrigger';
 import Preloader from './components/Preloader';
 import ScrollToTop from './components/ScrollToTop';
@@ -1240,6 +1241,17 @@ export default function App() {
 
   return (
     <BrowserRouter>
+      {/* ── SEO GLOBALE DI DEFAULT ── */}
+      <Helmet>
+        <title>Seba Mollo | Sviluppatore Frontend & Backend</title>
+        <meta 
+          name="description" 
+          content="Portfolio di Seba Mollo: Sviluppatore Frontend React e Backend Python. Design premium, animazioni interattive e architetture web scalabili." 
+        />
+        <meta property="og:title" content="Seba Mollo | Portfolio Ufficiale" />
+        <meta property="og:description" content="Sviluppatore web specializzato in interfacce 3D, design premium e backend custom. Dai un'occhiata ai miei progetti." />
+        <meta property="og:image" content="/images/anteprimaSito.jpg" />
+      </Helmet>
       <ScrollToTop />
       <TransitionLock />
       <CustomCursor />

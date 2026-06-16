@@ -8,6 +8,7 @@
 import { useState, useRef, useEffect, useCallback, useLayoutEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import gsap from "gsap";
+import { Helmet } from 'react-helmet-async';
 
 // ─── Design Tokens ────────────────────────────────────────────────────────────
 const C = {
@@ -415,6 +416,16 @@ export default function ContactPage() {
 
   return (
     <>
+      <Helmet>
+        <title>Contatti | Seba Mollo</title>
+        <meta 
+          name="description" 
+          content="Hai un progetto in mente? Contattami per discutere di interfacce premium, animazioni 3D e architetture web scalabili con Python e React." 
+        />
+        <meta property="og:title" content="Contatta Seba Mollo | Inizia il tuo progetto" />
+        <meta property="og:description" content="Sviluppatore Full-Stack specializzato in design premium. Iniziamo a collaborare." />
+        <meta property="og:image" content="/images/contactImage.jpg" />
+      </Helmet>
       <div className="cp-grain" aria-hidden="true" />
       
       {/* ── Page Transition Veil ── */}
