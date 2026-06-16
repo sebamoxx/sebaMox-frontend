@@ -360,7 +360,9 @@ const KineticModule = memo(() => {
 
     /* ── mobile: velocità di scroll → scatter ── */
     const isCoarse = window.matchMedia('(pointer: coarse)').matches;
-    let lastY = window.scrollY;
+
+    const scroller = document.getElementById('root') || document.documentElement;
+    let lastY = scroller.scrollTop; 
     let scrollVel = 0;
 
     /* ── parametri della molla ──
@@ -375,7 +377,7 @@ const KineticModule = memo(() => {
       // velocità di scroll (solo touch)
       let sv = 0;
       if (isCoarse) {
-        const y = window.scrollY;
+        const y = scroller.scrollTop;
         const raw = (y - lastY) / Math.max(dt, 0.001); // px/s
         lastY = y;
         scrollVel += (raw - scrollVel) * Math.min(1, dt * 10);
