@@ -30,6 +30,15 @@ gsap.registerPlugin(ScrollTrigger);
    refreshare su un vero cambio (rotazione/resize reale). */
 ScrollTrigger.config({ ignoreMobileResize: true });
 
+/* FIX JITTER #1: Forzare il PinType su Mobile
+   Di default GSAP usa `position: fixed` per le sezioni bloccate (pin).
+   Il fixed su mobile "scivola" quando la barra degli indirizzi si muove.
+   Forziamo i "transform" (che sono sganciati dalla UI del browser) 
+   SOLO sui dispositivi touch per non interferire con Lenis su desktop. */
+if (typeof window !== 'undefined' && window.matchMedia('(pointer: coarse)').matches) {
+  ScrollTrigger.defaults({ pinType: "transform" });
+}
+
 /* [2] normalizeScroll — VALUTATO e lasciato DISATTIVATO di proposito.
    normalizeScroll(true) farebbe gestire a GSAP scroll/touch su un thread
    dedicato (eliminerebbe anche i salti da resize) MA nella nostra architettura:
@@ -40,9 +49,9 @@ ScrollTrigger.config({ ignoreMobileResize: true });
    Con ignoreMobileResize il jitter è risolto senza prendere il controllo dello
    scroll. Abilitalo SOLO se, dopo i test, il salto persiste — e solo su touch,
    ricontrollando che il drag della barra e i click funzionino ancora: */
-if (window.matchMedia('(pointer: coarse)').matches) {
-   ScrollTrigger.normalizeScroll(true);
-}
+// if (window.matchMedia('(pointer: coarse)').matches) {
+//   ScrollTrigger.normalizeScroll(true);
+// }
 
 /**
  * ╔══════════════════════════════════════════════════════════════╗
@@ -647,7 +656,7 @@ const SectionFallback = () => {
           dvh = viewport dinamica reale, zero shift.
         */
         width: '100%',
-        height: '100dvh',
+        height: '100svh',
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
