@@ -28,11 +28,7 @@ gsap.registerPlugin(ScrollTrigger);
    livello interno salta il refresh se la larghezza non cambia e l'altezza varia
    meno del 25% (la firma tipica della barra indirizzi), ma continua a
    refreshare su un vero cambio (rotazione/resize reale). */
-ScrollTrigger.config({ 
-  autoRefreshEvents: "visibilitychange,DOMContentLoaded,load" // NOTA: Manca "resize"!
-});
-
-ScrollTrigger.defaults({ scroller: "#root" });
+ScrollTrigger.config({ ignoreMobileResize: true });
 
 /* [2] pinType "transform" SOLO su touch — i pin di ScrollTrigger di default
    usano position:fixed, che su mobile SALTA quando la toolbar si nasconde/
@@ -241,31 +237,84 @@ const ScrollProgress = memo(() => {
 
   // ── Scroll tracker ───────────────────────────────────────────────────────
   useEffect(() => {
-    const onScroll = () => {
-      const total = getTotal();
+    /* FIX CONFLITTO DI PRIORITÀ (jitter all'inversione) ─────────────────────
+       Il vecchio onScroll, ad OGNI evento scroll e sul main thread, faceva:
+         · getTotal() → legge scrollHeight + clientHeight = REFLOW forzato;
+         · scritture di textContent = layout/paint del testo.
+       Durante l'inversione il browser esegue il suo bounce nativo e questo
+       handler "reagiva in ritardo di qualche ms" → il salto. Ora:
+         · `total` è CACHATO → ZERO lettura di layout durante lo scroll (si
+           ricalcola solo al resize/quando il contenuto cambia altezza);
+         · throttle via requestAnimationFrame → N eventi scroll = 1 sola
+           passata DOM per frame, il listener non blocca mai il main thread;
+         · le scritture di TESTO (costose) avvengono SOLO quando la % cambia →
+           durante il micro-bounce di inversione (movimento minimo) il DOM
+           testo non viene toccato;
+         · barra/glow restano transform/opacity (compositor) ogni frame, fluidi;
+         · flag globale window.__isScrolling: true durante lo scroll, false
+           ~150ms dopo l'ultimo evento (= bounce nativo finito) → qualsiasi
+           aggiornamento critico altrove può controllarlo e rimandare. */
+    let total = getTotal();
+    let recalcRaf = 0;
+    const recalcTotal = () => {
+      // ricalcolo del totale debounced su rAF, MAI durante lo scroll
+      cancelAnimationFrame(recalcRaf);
+      recalcRaf = requestAnimationFrame(() => { total = getTotal(); });
+    };
+    // total cambia solo su resize/rotazione o quando il contenuto cresce (lazy)
+    window.addEventListener('resize', recalcTotal, { passive: true });
+    const ro = new ResizeObserver(recalcTotal);
+    ro.observe(document.body);
+
+    let rafId = 0;
+    let pending = false;
+    let lastPct = -1;
+    let scrollStop = null;
+
+    const paint = () => {
+      rafId = 0;
+      pending = false;
       if (total <= 0) return;
 
-      const raw   = window.scrollY / total;
-      const pct   = Math.min(Math.max(Math.floor(raw * 100), 0), 100);
-      const speed = Math.abs(window.scrollY - lastY.current);
-      lastY.current = window.scrollY;
+      const y     = window.scrollY;
+      const raw   = y / total;
+      const speed = Math.abs(y - lastY.current);
+      lastY.current = y;
 
-      if (textRef.current)
-        textRef.current.textContent = `[SYS.SCRL // ${String(pct).padStart(3,'0')}%]`;
-
-      if (logRef.current) {
-        logRef.current.textContent  = randomLog();
-        logRef.current.style.opacity = '0.65';
-      }
-
+      // compositor-only (economico): la barra segue lo scroll fluida ogni frame
       if (barRef.current)
         barRef.current.style.transform = `scaleY(${raw})`;
-
       if (glowRef.current) {
         glowRef.current.style.opacity   = String(Math.min(speed / 35, 0.85));
         glowRef.current.style.transform = `scaleY(${raw})`;
       }
 
+      // testo (layout/paint): SOLO al cambio di percentuale intera
+      const pct = Math.min(Math.max(Math.floor(raw * 100), 0), 100);
+      if (pct !== lastPct) {
+        lastPct = pct;
+        if (textRef.current)
+          textRef.current.textContent = `[SYS.SCRL // ${String(pct).padStart(3,'0')}%]`;
+        if (logRef.current) {
+          logRef.current.textContent  = randomLog();
+          logRef.current.style.opacity = '0.65';
+        }
+      }
+    };
+
+    const onScroll = () => {
+      // flag globale isScrolling (task 4): sollevato durante lo scroll/bounce
+      window.__isScrolling = true;
+      clearTimeout(scrollStop);
+      scrollStop = setTimeout(() => { window.__isScrolling = false; }, 150);
+
+      // throttle: una sola passata DOM per frame, listener non bloccante
+      if (!pending) {
+        pending = true;
+        rafId = requestAnimationFrame(paint);
+      }
+
+      // idle del log (comportamento invariato)
       clearTimeout(idleTimer.current);
       idleTimer.current = setTimeout(() => {
         if (logRef.current) {
@@ -277,10 +326,17 @@ const ScrollProgress = memo(() => {
     };
 
     window.addEventListener('scroll', onScroll, { passive: true });
-    onScroll();
+    paint(); // primo paint immediato
+
     return () => {
       window.removeEventListener('scroll', onScroll);
+      window.removeEventListener('resize', recalcTotal);
+      ro.disconnect();
+      cancelAnimationFrame(rafId);
+      cancelAnimationFrame(recalcRaf);
       clearTimeout(idleTimer.current);
+      clearTimeout(scrollStop);
+      window.__isScrolling = false;
     };
   }, []);
 
@@ -302,10 +358,117 @@ const ScrollProgress = memo(() => {
 
   // ── [A] Touch Events — mobile, LONG-PRESS ENGAGE ─────────────────────────
   useEffect(() => {
-    // DISATTIVATO: Il drag touch su mobile intercettava il pollice destro 
-    // e teletrasportava la pagina causando il finto "jitter".
-    // Ora la barra è puramente visiva su smartphone. Lo scroll resta 100% nativo!
-    return () => {};
+    const hitbox = hitboxRef.current;
+    if (!hitbox) return;
+
+    const HOLD_MS   = 220; // pressione ferma necessaria per agganciare il drag
+    const HOLD_TOL  = 10;  // px di movimento oltre i quali è uno swipe di scroll
+
+    let holdTimer = null;
+    let startX = 0, startY = 0;
+    let engaged = false;
+
+    const applyScroll = (clientY) => {
+      const ratio = Math.max(0, Math.min(1, clientY / getVH()));
+      scrollToPx(ratio * getTotal());
+    };
+
+    /*
+      FIX TOUCH FREEZE — ARCHITETTURA "ZERO INTERCETTAZIONE"
+      ────────────────────────────────────────────────────────────────────
+      PRIMA (bug): preventDefault() incondizionato sul touchstart +
+      touch-action:none sulla hitbox → ogni swipe che PARTIVA nei 44px del
+      bordo destro (la zona naturale del pollice) veniva cancellato →
+      pagina congelata, sblocco solo con un tap fuori dalla striscia.
+
+      ADESSO:
+      1. La hitbox ha touch-action: pan-y → il pan verticale nativo passa.
+      2. touchstart è { passive: true } e NON chiama mai preventDefault:
+         il compositor hardware resta libero al 100%.
+      3. Un monitor passive misura il movimento durante la finestra di hold:
+         se il dito si sposta >10px prima dei 220ms → swipe di scroll →
+         disinnesco totale, il browser non si accorge di noi.
+      4. Solo a hold completato (dito FERMO 220ms → lo scroll nativo non è
+         mai partito → niente "already started scrolling" lock) agganciamo
+         il touchmove { passive:false } su document e lo scrubbing 1:1
+         inizia. preventDefault qui è garantito da WebKit.
+      5. touchend/touchcancel deregistrano tutto immediatamente.
+
+      Il listener non-passive esiste sul document SOLO durante un drag
+      intenzionale: per tutto il resto della vita della pagina il browser
+      scrolla con il compositor hardware, senza consultare JS.
+      ────────────────────────────────────────────────────────────────────
+    */
+    const onEngagedMove = (e) => {
+      if (!isDragging.current) return;
+      e.preventDefault(); // efficace: lo scroll nativo non è mai partito
+      applyScroll(e.touches[0].clientY);
+    };
+
+    const disarmHold = () => {
+      clearTimeout(holdTimer);
+      holdTimer = null;
+      document.removeEventListener('touchmove', onHoldMonitor, { capture: true });
+    };
+
+    const onHoldMonitor = (e) => {
+      // monitor passive: misura soltanto, non blocca nulla
+      const t = e.touches[0];
+      if (!t) return;
+      if (Math.abs(t.clientX - startX) > HOLD_TOL || Math.abs(t.clientY - startY) > HOLD_TOL) {
+        // è uno swipe di scroll → disinnesco, il browser prosegue nativo
+        disarmHold();
+      }
+    };
+
+    const onTouchStart = (e) => {
+      const t = e.touches[0];
+      if (!t) return;
+      startX = t.clientX;
+      startY = t.clientY;
+      engaged = false;
+
+      // finestra di hold: monitor passive + timer
+      document.addEventListener('touchmove', onHoldMonitor, { passive: true, capture: true });
+      holdTimer = setTimeout(() => {
+        // dito fermo per 220ms → ENGAGE
+        disarmHold();
+        engaged = true;
+        isDragging.current = true;
+        setActive(true);
+        // feedback aptico dove supportato (Android); no-op altrove
+        if (navigator.vibrate) navigator.vibrate(8);
+        applyScroll(startY);
+        // SOLO ora il documento riceve un listener non-passive
+        document.addEventListener('touchmove', onEngagedMove, { passive: false, capture: true });
+      }, HOLD_MS);
+    };
+
+    const onTouchEnd = () => {
+      disarmHold();
+      if (engaged || isDragging.current) {
+        engaged = false;
+        isDragging.current = false;
+        setActive(false);
+        // Deregistra IMMEDIATAMENTE: libera il compositor appena il dito si alza.
+        document.removeEventListener('touchmove', onEngagedMove, { capture: true });
+      }
+    };
+
+    // touchstart passive: non blocchiamo MAI il gesto in partenza
+    hitbox.addEventListener('touchstart',    onTouchStart, { passive: true });
+    document.addEventListener('touchend',    onTouchEnd,   { passive: true });
+    document.addEventListener('touchcancel', onTouchEnd,   { passive: true });
+
+    return () => {
+      hitbox.removeEventListener('touchstart', onTouchStart);
+      document.removeEventListener('touchend',    onTouchEnd);
+      document.removeEventListener('touchcancel', onTouchEnd);
+      // Safety net: rimuove tutto se il componente smonta durante un drag
+      clearTimeout(holdTimer);
+      document.removeEventListener('touchmove', onHoldMonitor, { capture: true });
+      document.removeEventListener('touchmove', onEngagedMove, { capture: true });
+    };
   }, [setActive]);
 
   // ── [B] Pointer Events — desktop mouse/trackpad ───────────────────────────
@@ -945,34 +1108,6 @@ const HomePage = () => {
   );
 };
 
-// ─── DEBUGGER MOBILE (Rimuovere in produzione!) ────────────────────────────
-const MobileSpy = () => {
-  const [data, setData] = useState({ refresh: 0, w: window.innerWidth, h: window.innerHeight });
-  
-  useEffect(() => {
-    let r = 0;
-    // Ascolta ogni volta che GSAP fa un ricalcolo (refresh)
-    const onRef = () => setData(prev => ({ ...prev, refresh: ++r }));
-    ScrollTrigger.addEventListener("refreshInit", onRef);
-
-    // Ascolta ogni volta che il telefono cambia dimensioni
-    const onRes = () => setData(prev => ({ ...prev, w: window.innerWidth, h: window.innerHeight }));
-    window.addEventListener("resize", onRes);
-
-    return () => {
-      ScrollTrigger.removeEventListener("refreshInit", onRef);
-      window.removeEventListener("resize", onRes);
-    };
-  }, []);
-
-  return (
-    <div style={{ position: 'fixed', top: 0, left: 0, zIndex: 999999, background: 'rgba(255,0,0,0.9)', color: 'white', padding: '10px', fontSize: '14px', pointerEvents: 'none', fontFamily: 'monospace', borderBottomRightRadius: '8px' }}>
-      GSAP Refreshes: <strong style={{fontSize: '18px'}}>{data.refresh}</strong><br/>
-      W: {data.w}px | H: {data.h}px
-    </div>
-  );
-};
-
 export default function App() {
   // ── FIX 1 — DISABILITA SCROLL RESTORATION NATIVA ────────────────────────────
   // Il browser salva e ripristina automaticamente la posizione di scroll
@@ -1054,7 +1189,6 @@ export default function App() {
 
   return (
     <BrowserRouter>
-      <MobileSpy />
       <ScrollToTop />
       <TransitionLock />
       <CustomCursor />
