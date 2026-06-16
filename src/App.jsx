@@ -13,6 +13,37 @@ if ('scrollRestoration' in history) {
 
 gsap.registerPlugin(ScrollTrigger);
 
+/* ════════════════════════════════════════════════════════════════════════
+   FIX JITTER MOBILE AL CAMBIO DIREZIONE DI SCROLL
+   Root cause: la barra indirizzi dinamica (Chrome Android / in-app IG/FB)
+   appare/scompare quando INVERTI lo scroll → evento `resize` della window →
+   ScrollTrigger esegue un refresh() automatico → ricalcola pin e posizioni →
+   micro-salto visibile. Lo si vede solo su mobile perché solo lì la toolbar
+   è dinamica.
+   ──────────────────────────────────────────────────────────────────────── */
+
+/* [1] ignoreMobileResize — IL FIX MIRATO. ScrollTrigger ignora i resize
+   causati SOLO dalla UI mobile (toolbar che si nasconde/riappare). GSAP applica
+   questo flag esclusivamente quando isTouch === 1 → NON tocca il desktop. A
+   livello interno salta il refresh se la larghezza non cambia e l'altezza varia
+   meno del 25% (la firma tipica della barra indirizzi), ma continua a
+   refreshare su un vero cambio (rotazione/resize reale). */
+ScrollTrigger.config({ ignoreMobileResize: true });
+
+/* [2] normalizeScroll — VALUTATO e lasciato DISATTIVATO di proposito.
+   normalizeScroll(true) farebbe gestire a GSAP scroll/touch su un thread
+   dedicato (eliminerebbe anche i salti da resize) MA nella nostra architettura:
+     · intercetta i touch → conflitto con lo scrubber a long-press della
+       ScrollProgress (i nostri touchmove non-passive) e con lo scroll NATIVO
+       che usiamo APPOSTA su mobile (Lenis è già disattivato sul touch);
+     · può rompere position:fixed e reintrodurre latenza/jank.
+   Con ignoreMobileResize il jitter è risolto senza prendere il controllo dello
+   scroll. Abilitalo SOLO se, dopo i test, il salto persiste — e solo su touch,
+   ricontrollando che il drag della barra e i click funzionino ancora: */
+// if (window.matchMedia('(pointer: coarse)').matches) {
+//   ScrollTrigger.normalizeScroll(true);
+// }
+
 /**
  * ╔══════════════════════════════════════════════════════════════╗
  * ║   ScrollProgress.jsx — v4 — TOUCH FREEZE DEFINITIVELY FIXED  ║
@@ -1039,10 +1070,43 @@ export default function App() {
     // page is visible and layout is stable. Two delayed refreshes handle
     // any lazy-loaded sections that paint after the first recalc.
     // (Il ResizeObserver globale in main.jsx copre tutti i casi successivi.)
+    // Primo refresh: il layout è appena diventato visibile e l'utente non sta
+    // ancora scrollando → sicuro, nessun salto.
     ScrollTrigger.refresh();
-    const id1 = setTimeout(() => ScrollTrigger.refresh(true),  500);
-    const id2 = setTimeout(() => ScrollTrigger.refresh(true), 1500);
-    return () => { clearTimeout(id1); clearTimeout(id2); };
+
+    /* REFRESH RITARDATI "SCROLL-SAFE" — le sezioni lazy dipingono dopo, quindi
+       servono ancora i refresh a 500/1500ms. PROBLEMA: se partono MENTRE
+       l'utente sta scrollando, strappano la pagina (il salto che vogliamo
+       evitare). SOLUZIONE: un flag isScrolling; finché è attivo il refresh
+       viene RIMANDATO (riprovato ogni 200ms) e parte solo quando lo scroll è
+       fermo da ~150ms → il ricalcolo non avviene MAI durante un gesto. */
+    let isScrolling = false;
+    let idleTimer;
+    let retryTimer;
+    const onScrollMark = () => {
+      isScrolling = true;
+      clearTimeout(idleTimer);
+      idleTimer = setTimeout(() => { isScrolling = false; }, 150);
+    };
+    window.addEventListener('scroll', onScrollMark, { passive: true });
+
+    const safeRefresh = () => {
+      if (isScrolling) {
+        retryTimer = setTimeout(safeRefresh, 200); // utente in scroll → rimanda
+        return;
+      }
+      ScrollTrigger.refresh();
+    };
+    const id1 = setTimeout(safeRefresh,  500);
+    const id2 = setTimeout(safeRefresh, 1500);
+
+    return () => {
+      clearTimeout(id1);
+      clearTimeout(id2);
+      clearTimeout(idleTimer);
+      clearTimeout(retryTimer);
+      window.removeEventListener('scroll', onScrollMark);
+    };
   }, [preloaderDone]);
 
   /* PERF FIX: useCallback → riferimento STABILE passato a <Preloader>. Senza,
