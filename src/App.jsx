@@ -941,6 +941,34 @@ const HomePage = () => {
   );
 };
 
+// ─── DEBUGGER MOBILE (Rimuovere in produzione!) ────────────────────────────
+const MobileSpy = () => {
+  const [data, setData] = useState({ refresh: 0, w: window.innerWidth, h: window.innerHeight });
+  
+  useEffect(() => {
+    let r = 0;
+    // Ascolta ogni volta che GSAP fa un ricalcolo (refresh)
+    const onRef = () => setData(prev => ({ ...prev, refresh: ++r }));
+    ScrollTrigger.addEventListener("refreshInit", onRef);
+
+    // Ascolta ogni volta che il telefono cambia dimensioni
+    const onRes = () => setData(prev => ({ ...prev, w: window.innerWidth, h: window.innerHeight }));
+    window.addEventListener("resize", onRes);
+
+    return () => {
+      ScrollTrigger.removeEventListener("refreshInit", onRef);
+      window.removeEventListener("resize", onRes);
+    };
+  }, []);
+
+  return (
+    <div style={{ position: 'fixed', top: 0, left: 0, zIndex: 999999, background: 'rgba(255,0,0,0.9)', color: 'white', padding: '10px', fontSize: '14px', pointerEvents: 'none', fontFamily: 'monospace', borderBottomRightRadius: '8px' }}>
+      GSAP Refreshes: <strong style={{fontSize: '18px'}}>{data.refresh}</strong><br/>
+      W: {data.w}px | H: {data.h}px
+    </div>
+  );
+};
+
 export default function App() {
   // ── FIX 1 — DISABILITA SCROLL RESTORATION NATIVA ────────────────────────────
   // Il browser salva e ripristina automaticamente la posizione di scroll
@@ -1022,6 +1050,7 @@ export default function App() {
 
   return (
     <BrowserRouter>
+      <MobileSpy />
       <ScrollToTop />
       <TransitionLock />
       <CustomCursor />
