@@ -41,22 +41,11 @@ html {
   /* NIENTE height:100vh qui: il documento scrolla in modo nativo e fluido. */
 }
 
-/* FIX JANK / SALTO SCROLL — overflow-anchor mirato per device.
-   PRIMA: `overflow-anchor: none` GLOBALE disattivava lo scroll-anchoring di
-   Chrome. Quando una sezione lazy o un'immagine SOPRA il viewport finisce di
-   caricare, la posizione di scroll salta ("si sposta in alto/basso in modo
-   imprevedibile"). Safari non implementa overflow-anchor → per questo il bug
-   si vedeva SOLO su Chrome e negli in-app browser, mai su Safari.
-   ADESSO:
-   · pointer:fine (desktop, dove gira Lenis) → lo teniamo `none`: l'anchoring
-     darebbe fastidio allo smooth-scroll virtuale.
-   · pointer:coarse (mobile/touch, niente Lenis) → lo RIPRISTINIAMO `auto`:
-     scroll stabile, nessun salto quando i lazy-chunk si idratano. */
-@media (pointer: fine) {
-  html { overflow-anchor: none; }
-}
-@media (pointer: coarse) {
-  html { overflow-anchor: auto; }
+/* Disattiva globalmente lo Scroll Anchoring nativo di Chrome.
+   Fondamentale quando si usa GSAP ScrollTrigger per evitare che 
+   il browser e GSAP "litighino" sulla posizione durante lo scroll su mobile. */
+html, body {
+  overflow-anchor: none !important;
 }
 
 body {
