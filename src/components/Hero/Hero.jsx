@@ -275,7 +275,7 @@ export default function HeroSection() {
         style={{
           position: 'relative',
           width: '100%',
-          minHeight: '100dvh',
+          minHeight: '100svh',
           backgroundColor: C.void,
           overflow: 'hidden',
           display: 'grid',

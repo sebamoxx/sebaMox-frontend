@@ -1042,7 +1042,7 @@ function ProcessSection() {
             width: '40%',
             position: 'sticky',
             top: 0,
-            height: '100dvh',
+            height: '100svh',
             display: 'flex',
             flexDirection: 'column',
             justifyContent: 'center',
@@ -1851,7 +1851,7 @@ function ContactSection({ audio }) {
            Testo a sinistra (colonna max ~560px), metà destra libera per il robot. */
         @media (min-width:1024px){
           .awwwards-contact{
-            min-height:clamp(520px, 64vh, 820px);  /* stage verticale per il robot */
+            min-height:clamp(520px, 64svh, 820px);  /* stage verticale per il robot */
           }
           .awwwards-contact .contact-content{
             text-align:left;
@@ -1999,7 +1999,7 @@ const Sections = () => (
       .stats-grid { grid-template-columns: repeat(4, 1fr); }
 
       .work-section {
-        min-height: 100dvh;
+        min-height: 100svh;
         display: flex;
         flex-direction: column;
       }

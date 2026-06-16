@@ -30,16 +30,21 @@ gsap.registerPlugin(ScrollTrigger);
    refreshare su un vero cambio (rotazione/resize reale). */
 ScrollTrigger.config({ ignoreMobileResize: true });
 
-/* FIX JITTER #1: Forzare il PinType su Mobile
-   Di default GSAP usa `position: fixed` per le sezioni bloccate (pin).
-   Il fixed su mobile "scivola" quando la barra degli indirizzi si muove.
-   Forziamo i "transform" (che sono sganciati dalla UI del browser) 
-   SOLO sui dispositivi touch per non interferire con Lenis su desktop. */
-if (typeof window !== 'undefined' && window.matchMedia('(pointer: coarse)').matches) {
-  ScrollTrigger.defaults({ pinType: "transform" });
+/* [2] pinType "transform" SOLO su touch — i pin di ScrollTrigger di default
+   usano position:fixed, che su mobile SALTA quando la toolbar si nasconde/
+   riappare (il fixed è relativo alla viewport che si ridimensiona). Con
+   pinType:"transform" il pin usa un transform, immune al resize della UI mobile.
+   Su desktop resta "fixed" (default) per non interferire con Lenis.
+   NB onesto: l'unico pin attuale (scroll orizzontale dei lavori in
+   AwwwardsSections) è dentro mm.add('(min-width:768px)') → DESKTOP-ONLY, quindi
+   su mobile non c'è alcun pin da far saltare. Questo è una rete di sicurezza per
+   eventuali pin mobile futuri; il jitter mobile ATTUALE nasce dalle altezze dvh
+   (corrette → svh nei componenti, vedi note di consegna). */
+if (ScrollTrigger.isTouch === 1) {
+  ScrollTrigger.defaults({ pinType: 'transform' });
 }
 
-/* [2] normalizeScroll — VALUTATO e lasciato DISATTIVATO di proposito.
+/* [3] normalizeScroll — VALUTATO e lasciato DISATTIVATO di proposito.
    normalizeScroll(true) farebbe gestire a GSAP scroll/touch su un thread
    dedicato (eliminerebbe anche i salti da resize) MA nella nostra architettura:
      · intercetta i touch → conflitto con lo scrubber a long-press della
@@ -649,12 +654,10 @@ const SectionFallback = () => {
     <div
       aria-hidden="true"
       style={{
-        /* 100dvh (non 100vh): su iOS Safari 100vh include la toolbar e
-          cambia quando questa appare/scompare → il fallback risultava più
-          alto della viewport reale e, alla sostituzione con la sezione
-          vera, produceva un layout-shift che sporcava i bounds di Lenis.
-          dvh = viewport dinamica reale, zero shift.
-        */
+        /* FIX JITTER: 100svh (NON 100dvh né 100vh). Sia `vh` che `dvh` cambiano
+          quando la toolbar mobile si nasconde/riappare → reflow/salto durante lo
+          scroll. `svh` (small viewport height) è ANCORATO alla viewport con la
+          toolbar visibile: resta fisso → zero shift, zero jitter. */
         width: '100%',
         height: '100svh',
         display: 'flex',

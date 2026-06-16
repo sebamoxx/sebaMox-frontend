@@ -927,7 +927,7 @@ export default function LabSection() {
           background: ${C.bg};
           color: ${C.txt};
           font-family: ${FONT};
-          padding: clamp(5rem, 12vh, 11rem) 0 clamp(3rem, 6vh, 6rem);
+          padding: clamp(5rem, 12svh, 11rem) 0 clamp(3rem, 6svh, 6rem);
           overflow: hidden;
         }
         .lb-rails { position: absolute; inset: 0; pointer-events: none; }
@@ -951,9 +951,9 @@ export default function LabSection() {
         .lb-header { position: relative; z-index: 2; padding: 0 clamp(2rem, 6vw, 6.5rem); }
         .lb-header-meta {
           display: flex; flex-wrap: wrap; gap: clamp(1rem, 3vw, 2.6rem);
-          padding-bottom: clamp(1.2rem, 2.4vh, 2rem);
+          padding-bottom: clamp(1.2rem, 2.4svh, 2rem);
           border-bottom: 1px solid ${C.hair};
-          margin-bottom: clamp(1.6rem, 3.5vh, 3rem);
+          margin-bottom: clamp(1.6rem, 3.5svh, 3rem);
         }
         .lb-title {
           margin: 0; padding: 0;
@@ -967,7 +967,7 @@ export default function LabSection() {
         .lb-title-line { display: inline-block; will-change: transform; }
         .lb-title-dot { font-style: normal; color: ${C.green}; }
         .lb-header-sub {
-          margin: clamp(1.4rem, 3vh, 2.6rem) 0 0;
+          margin: clamp(1.4rem, 3svh, 2.6rem) 0 0;
           max-width: 44ch;
           font-size: clamp(0.92rem, 1.15vw, 1.08rem);
           line-height: 1.7; color: ${C.mut};
@@ -975,7 +975,7 @@ export default function LabSection() {
 
         /* ═══ MARQUEE ═══ */
         .lb-marquee {
-          margin: clamp(2.5rem, 6vh, 5rem) 0 0;
+          margin: clamp(2.5rem, 6svh, 5rem) 0 0;
           border-top: 1px solid ${C.hair}; border-bottom: 1px solid ${C.hair};
           overflow: hidden; white-space: nowrap;
         }
@@ -1007,17 +1007,17 @@ export default function LabSection() {
           border: 1px solid ${C.hair};
         }
         .lb-mod { background: ${C.panel}; min-width: 0; display: flex; flex-direction: column; }
-        .lb-mod-plasma    { grid-column: span 12; min-height: clamp(380px, 62vh, 720px); }
-        .lb-mod-kinetic   { grid-column: span 7;  min-height: clamp(340px, 50vh, 600px); }
-        .lb-mod-tension   { grid-column: span 5;  min-height: clamp(340px, 50vh, 600px); touch-action: pan-y; }
-        .lb-mod-daemon    { grid-column: span 8;  min-height: clamp(320px, 44vh, 540px); }
-        .lb-mod-telemetry { grid-column: span 4;  min-height: clamp(320px, 44vh, 540px); }
+        .lb-mod-plasma    { grid-column: span 12; min-height: clamp(380px, 62svh, 720px); }
+        .lb-mod-kinetic   { grid-column: span 7;  min-height: clamp(340px, 50svh, 600px); }
+        .lb-mod-tension   { grid-column: span 5;  min-height: clamp(340px, 50svh, 600px); touch-action: pan-y; }
+        .lb-mod-daemon    { grid-column: span 8;  min-height: clamp(320px, 44svh, 540px); }
+        .lb-mod-telemetry { grid-column: span 4;  min-height: clamp(320px, 44svh, 540px); }
         .lb-mod-plasma, .lb-mod-kinetic { touch-action: pan-y; } /* il dito interagisce MA lo scroll passa */
 
         /* ═══ INTESTAZIONE MODULO ═══ */
         .lb-mod-head {
           display: flex; align-items: center; gap: clamp(0.7rem, 1.6vw, 1.4rem);
-          padding: clamp(0.7rem, 1.4vh, 1rem) clamp(0.9rem, 2vw, 1.6rem);
+          padding: clamp(0.7rem, 1.4svh, 1rem) clamp(0.9rem, 2vw, 1.6rem);
           border-bottom: 1px solid ${C.hair};
           font-family: ${MONO}; font-size: clamp(0.56rem, 0.72vw, 0.66rem);
           letter-spacing: 0.14em; text-transform: uppercase;
@@ -1038,14 +1038,14 @@ export default function LabSection() {
         .lb-plasma-caption {
           position: absolute; left: 0; right: 0; bottom: 0;
           display: flex; justify-content: space-between; gap: 1rem; flex-wrap: wrap;
-          padding: clamp(0.7rem, 1.5vh, 1.1rem) clamp(0.9rem, 2vw, 1.6rem);
+          padding: clamp(0.7rem, 1.5svh, 1.1rem) clamp(0.9rem, 2vw, 1.6rem);
           border-top: 1px solid ${C.hair};
           background: rgba(3,2,1,0.55); backdrop-filter: none;
           pointer-events: none;
         }
 
         /* ═══ MOD.02 CINETICA ═══ */
-        .lb-kinetic-body { align-items: center; justify-content: center; padding: clamp(1.5rem, 4vh, 3rem) clamp(1rem, 2.5vw, 2rem); }
+        .lb-kinetic-body { align-items: center; justify-content: center; padding: clamp(1.5rem, 4svh, 3rem) clamp(1rem, 2.5vw, 2rem); }
         .lb-kinetic-word {
           display: flex;
           font-weight: 900; text-transform: uppercase;
@@ -1058,7 +1058,7 @@ export default function LabSection() {
         .lb-kinetic-caption {
           position: absolute; left: 0; right: 0; bottom: 0;
           display: flex; justify-content: space-between; gap: 1rem; flex-wrap: wrap;
-          padding: clamp(0.7rem, 1.5vh, 1.1rem) clamp(0.9rem, 2vw, 1.6rem);
+          padding: clamp(0.7rem, 1.5svh, 1.1rem) clamp(0.9rem, 2vw, 1.6rem);
           border-top: 1px solid ${C.hair}; pointer-events: none;
         }
         /* le istruzioni cambiano in base al tipo di puntatore del device */
@@ -1073,7 +1073,7 @@ export default function LabSection() {
         .lb-tension-caption {
           position: absolute; left: 0; right: 0; bottom: 0;
           display: flex; justify-content: space-between; gap: 1rem; flex-wrap: wrap;
-          padding: clamp(0.7rem, 1.5vh, 1.1rem) clamp(0.9rem, 2vw, 1.6rem);
+          padding: clamp(0.7rem, 1.5svh, 1.1rem) clamp(0.9rem, 2vw, 1.6rem);
           border-top: 1px solid ${C.hair}; pointer-events: none;
         }
 
@@ -1081,7 +1081,7 @@ export default function LabSection() {
         .lb-term-screen {
           flex: 1; min-height: 0;
           overflow: hidden;
-          padding: clamp(1rem, 2.2vh, 1.6rem) clamp(1rem, 2.2vw, 1.8rem);
+          padding: clamp(1rem, 2.2svh, 1.6rem) clamp(1rem, 2.2vw, 1.8rem);
           font-family: ${MONO};
           font-size: clamp(0.62rem, 0.95vw, 0.8rem);
           line-height: 1.85;
@@ -1102,7 +1102,7 @@ export default function LabSection() {
         }
         .lb-tel-cell {
           background: ${C.panel};
-          padding: clamp(0.9rem, 2vh, 1.4rem) clamp(1rem, 2.2vw, 1.8rem);
+          padding: clamp(0.9rem, 2svh, 1.4rem) clamp(1rem, 2.2vw, 1.8rem);
           display: flex; flex-direction: column; gap: 0.45rem; justify-content: center;
         }
         .lb-tel-value {
@@ -1116,7 +1116,7 @@ export default function LabSection() {
         .lb-footstrip {
           display: flex; justify-content: space-between; gap: 1rem;
           margin: 0 clamp(1.25rem, 4vw, 4.5rem);
-          padding: clamp(1rem, 2.2vh, 1.6rem) 0 0;
+          padding: clamp(1rem, 2.2svh, 1.6rem) 0 0;
         }
 
         /* ═══ RESPONSIVE — impilamento elegante ═══ */
@@ -1130,10 +1130,10 @@ export default function LabSection() {
         @media (max-width: 640px) {
           .lb-title { font-size: clamp(3rem, 16.5vw, 5.4rem); }
           .lb-title-row-2 { padding-left: clamp(0.8rem, 8vw, 2.5rem); }
-          .lb-mod-plasma  { min-height: clamp(300px, 52vh, 480px); }
-          .lb-mod-kinetic { min-height: clamp(260px, 40vh, 420px); }
-          .lb-mod-tension { min-height: clamp(280px, 42vh, 440px); }
-          .lb-mod-daemon  { min-height: clamp(280px, 40vh, 420px); }
+          .lb-mod-plasma  { min-height: clamp(300px, 52svh, 480px); }
+          .lb-mod-kinetic { min-height: clamp(260px, 40svh, 420px); }
+          .lb-mod-tension { min-height: clamp(280px, 42svh, 440px); }
+          .lb-mod-daemon  { min-height: clamp(280px, 40svh, 420px); }
           .lb-mod-file { display: none; } /* il nome-file mono è rumore sotto i 640px */
           .lb-kinetic-word { font-size: clamp(2.2rem, 12.5vw, 4.2rem); }
         }
