@@ -1098,17 +1098,19 @@ const HomePage = () => {
 
     if (targetId) {
       scrollToElementWhenReady(targetId).then(() => {
-        // Final guard before the veil lifts
-        if (window.__lenis) {
-          const el = document.getElementById(targetId);
-          if (el) {
-            let top = 0, node = el;
-            while (node && node !== document.body && node !== document.documentElement) {
-              top += node.offsetTop;
-              node = node.offsetParent;
-            }
-            window.__lenis.scrollTo(top, { immediate: true, duration: 0 });
+        // Final guard before the veil lifts.
+        // FIX scroller interno: su touch lo scroll è dentro #root, quindi
+        // riposizioniamo #root.scrollTop sul target; su desktop usiamo Lenis.
+        const _root = getScrollEl();
+        const elT = document.getElementById(targetId);
+        if (elT) {
+          let top = 0, node = elT;
+          while (node && node !== document.body && node !== document.documentElement) {
+            top += node.offsetTop;
+            node = node.offsetParent;
           }
+          if (_root) _root.scrollTop = top;
+          else if (window.__lenis) window.__lenis.scrollTo(top, { immediate: true, duration: 0 });
         }
 
         if (veilRef.current) {
@@ -1127,9 +1129,10 @@ const HomePage = () => {
         gsap.set(veilRef.current, { scaleY: 0 });
       }
       requestAnimationFrame(() => {
-        if (window.__lenis) {
-          window.__lenis.scrollTo(0, { immediate: true, duration: 0 });
-        }
+        // FIX scroller interno: su touch azzera #root, su desktop usa Lenis.
+        const _root = getScrollEl();
+        if (_root) _root.scrollTop = 0;
+        else if (window.__lenis) window.__lenis.scrollTo(0, { immediate: true, duration: 0 });
       });
     }
   }, [location]); // We listen to the location object directly

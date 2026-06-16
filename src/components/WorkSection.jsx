@@ -313,7 +313,6 @@ export default function WorkSection({
 
     /* revert() uccide quickTo, tween infiniti, ScrollTrigger e set */
     return () => {
-      window.removeEventListener('resize', setRealVH);
       gsapCtx.revert();
     };
   }, []);

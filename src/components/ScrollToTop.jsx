@@ -6,76 +6,73 @@ import { ScrollTrigger } from 'gsap/ScrollTrigger';
 gsap.registerPlugin(ScrollTrigger);
 
 // ─────────────────────────────────────────────────────────────────────────────
-// ScrollToTop — v4 — "Intent-Aware"
+// ScrollToTop — reset dello scroll ad ogni cambio rotta
 // ─────────────────────────────────────────────────────────────────────────────
 //
-// PROBLEMA RISOLTO: In v3 questo componente leggeva `state` direttamente
-// da useLocation() per decidere se ignorare il reset. Questo creava una
-// race condition su mobile:
+// FIX "PAGINE NON COLLEGATE" (scroller interno mobile):
+//   Da quando, su touch, la barra del browser è bloccata facendo scrollare #root
+//   invece del documento (vedi index.css @media pointer:coarse + App.jsx), lo
+//   scroll NON vive più sul window. Il vecchio reset (window.scrollTo(0,0) +
+//   document.body.scrollTop = 0) azzerava l'elemento SBAGLIATO → cambiando rotta
+//   (es. → /works, → /contact) #root restava scrollato a metà e la nuova pagina
+//   si apriva "in mezzo", sembrando scollegata.
+//   FIX: su touch azzeriamo #root.scrollTop; su desktop restiamo su Lenis/window.
 //
-//   T+0ms    navigate("/", { state: { scrollTo: 'contact-section' } })
-//   T+4ms    ScrollToTop re-render → legge state, trova scrollTo → OK, salta.
-//   T+8ms    App.jsx useEffect → legge location.key → chiama scrollToElementWhenReady
-//   T+???ms  [mobile] Suspense risolve, layout si stabilizza
-//   T+???ms  scrollToElementWhenReady risolve, chiama lenis.scrollTo(targetY)
-//   T+???ms  iOS scroll restoration spara un popstate silenzioso → window.scrollY = 0
-//              ↑ su desktop questo non accade perché la finestra non ha perso focus
-//
-// Il problema NON era in ScrollToTop — era che il "guard" basato su `state`
-// funzionava correttamente. Il vero problema era in executeScroll (App.jsx):
-// il "lock a 60 frame" calcolava targetY su un layout ancora instabile.
-//
-// Tuttavia, aggiungiamo un secondo layer di protezione:
-//   window.__scrollIntent = { targetId, resolved: false }
-//
-// È un flag globale scritto da App.jsx PRIMA di chiamare scrollToElementWhenReady,
-// e cancellato DOPO che il veil si è alzato.
-//
-// ScrollToTop controlla questo flag: se è attivo, NON tocca né lo scroll
-// né i ScrollTrigger. Questo garantisce che anche un eventuale re-render
-// di ScrollToTop durante la transizione non interferisca con il processo.
+// I due guard (state.scrollTo e window.__scrollIntent) restano invariati: quando
+// è in corso un ritorno "intent-aware" alla home con scroll verso una sezione,
+// è la pipeline di App.jsx (scrollToElementWhenReady) a gestire la posizione.
 // ─────────────────────────────────────────────────────────────────────────────
+
+// Azzera lo scroller corretto in base al device.
+const resetScrollTop = () => {
+  // Su touch lo scroll è dentro #root (barra del browser fissa).
+  const coarse = typeof window.matchMedia === 'function' &&
+    window.matchMedia('(pointer: coarse)').matches;
+  const root = document.getElementById('root');
+
+  if (coarse && root) {
+    root.scrollTop = 0;
+    return;
+  }
+  if (window.__lenis) {
+    window.__lenis.scrollTo(0, { immediate: true });
+    return;
+  }
+  // Desktop senza Lenis / fallback: azzera ogni possibile scroller del documento.
+  window.scrollTo(0, 0);
+  document.documentElement.scrollTop = 0;
+  document.body.scrollTop = 0;
+};
 
 export default function ScrollToTop() {
   const { pathname, state } = useLocation();
   const prevPathRef = useRef(pathname);
 
   useEffect(() => {
-    // ── GUARD 1: flag da location.state (compatibilità con v3) ────────────────
-    // Se la navigazione ha un target esplicito o ha chiesto di non resettare,
-    // App.jsx gestirà tutto. Usciamo subito.
+    // ── GUARD 1: target esplicito → ci pensa App.jsx (scrollToElementWhenReady) ──
     if (state?.scrollTo || state?.scrollToWorks || state?.noScrollReset) {
       prevPathRef.current = pathname;
       return;
     }
 
-    // ── GUARD 2: flag globale window.__scrollIntent ────────────────────────────
-    // App.jsx imposta questo flag PRIMA di chiamare scrollToElementWhenReady.
-    // Se è attivo, una transizione "intent" è in corso e non dobbiamo
-    // interferire nemmeno se state fosse già stato consumato da React.
+    // ── GUARD 2: transizione "intent" in corso → non interferire ──────────────
     if (window.__scrollIntent?.active) {
       prevPathRef.current = pathname;
       return;
     }
 
-    // ── RESET STANDARD (cambio di rotta senza intent specifico) ───────────────
+    // ── RESET STANDARD (cambio rotta senza target specifico) ──────────────────
     if (pathname !== prevPathRef.current) {
-      // Uccidiamo i trigger PRIMA di scrollare per evitare che
-      // i pin-spacer in corso di dismissione interferiscano con il reset.
+      // Uccidiamo i trigger PRIMA di scrollare per evitare che i pin-spacer in
+      // dismissione interferiscano con il reset.
       ScrollTrigger.getAll().forEach((st) => st.kill());
 
-      if (window.__lenis) {
-        window.__lenis.scrollTo(0, { immediate: true });
-      } else {
-        window.scrollTo(0, 0);
-        document.documentElement.scrollTop = 0;
-        document.body.scrollTop = 0;
-      }
+      // FIX: azzera lo scroller GIUSTO (#root su touch, window/Lenis su desktop).
+      resetScrollTop();
 
       prevPathRef.current = pathname;
 
       // Cascade refresh progressivo — i Suspense lazy si idratano in ritardo.
-      // Tre refresh coprono i casi di: idratazione rapida, lenta, e immagini lazy.
       const ids = [
         setTimeout(() => ScrollTrigger.refresh(true),  50),
         setTimeout(() => ScrollTrigger.refresh(true), 500),
