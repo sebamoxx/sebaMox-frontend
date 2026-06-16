@@ -357,7 +357,7 @@ export default function HeroSection() {
           >
             {/* ── NUOVO LOGO INSERITO QUI ── */}
             <img 
-              src="/logo2DFigma.png" 
+              src="/favicon.png" 
               alt="Sebamox Logo" 
               style={{
                 width: '32px',
