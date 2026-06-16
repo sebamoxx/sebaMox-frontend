@@ -44,6 +44,17 @@ if (ScrollTrigger.isTouch === 1) {
   ScrollTrigger.defaults({ pinType: 'transform' });
 }
 
+/* [2b] SCROLLER = #root su touch — con la barra del browser bloccata lo scroll
+   avviene DENTRO #root, non sul window. Diciamo a ScrollTrigger di usare #root
+   come scroller su touch, PRIMA che i componenti lazy creino i loro trigger
+   (altrimenti osserverebbero il window, che non scrolla → animazioni ferme).
+   Su desktop resta il window (default), dove gira Lenis. */
+if (typeof window !== 'undefined' && window.matchMedia &&
+    window.matchMedia('(pointer: coarse)').matches) {
+  const _rootScroller = document.getElementById('root');
+  if (_rootScroller) ScrollTrigger.defaults({ scroller: _rootScroller });
+}
+
 /* [3] normalizeScroll — VALUTATO e lasciato DISATTIVATO di proposito.
    normalizeScroll(true) farebbe gestire a GSAP scroll/touch su un thread
    dedicato (eliminerebbe anche i salti da resize) MA nella nostra architettura:
@@ -162,13 +173,46 @@ const randomLog = () => {
   return typeof e === 'function' ? e() : e;
 };
 
-// ─── Viewport helpers (stabili su Safari iOS) ─────────────────────────────────
+// ─── SCROLLER CONDIZIONALE (barra del browser SEMPRE fissa su mobile) ────────
+/* Su TOUCH teniamo la barra del browser bloccata facendo scrollare #root invece
+   del documento (vedi index.css → @media (pointer:coarse): html/body fissi a
+   tutta viewport, #root overflow-y:auto). Risultato: il documento NON scrolla →
+   Chrome/Android, in-app IG/FB e Safari NON nascondono/mostrano la barra →
+   niente resize, niente jitter all'inversione.
+   Su DESKTOP nulla cambia: scroll nativo del documento + Lenis (la barra non c'è).
+   getScrollEl() = l'elemento scroller su touch, oppure null su desktop (= window). */
+const IS_COARSE = typeof window !== 'undefined' &&
+  typeof window.matchMedia === 'function' &&
+  window.matchMedia('(pointer: coarse)').matches;
+let _scrollEl = null;
+const getScrollEl = () => {
+  if (!IS_COARSE) return null;
+  if (!_scrollEl) _scrollEl = document.getElementById('root');
+  return _scrollEl;
+};
+
+// ─── Viewport helpers (puntano allo scroller giusto) ─────────────────────────
 // clientHeight = layout viewport, NON cambia quando la toolbar Safari sparisce.
-const getVH    = () => document.documentElement.clientHeight;
-const getTotal = () => document.documentElement.scrollHeight - getVH();
+const getVH    = () => {
+  const el = getScrollEl();
+  return el ? el.clientHeight : document.documentElement.clientHeight;
+};
+const getTotal = () => {
+  const el = getScrollEl();
+  return el ? (el.scrollHeight - el.clientHeight)
+            : (document.documentElement.scrollHeight - getVH());
+};
+// Posizione di scroll corrente: #root.scrollTop su touch, window.scrollY su desktop.
+const getScrollY = () => {
+  const el = getScrollEl();
+  return el ? el.scrollTop : window.scrollY;
+};
 
 // ─── scrollTo wrapper con Lenis detection ────────────────────────────────────
 const scrollToPx = (px) => {
+  // TOUCH: lo scroll è dentro #root → muovilo direttamente (niente window).
+  const el = getScrollEl();
+  if (el) { el.scrollTop = px; return; }
   if (window.__lenis) {
     // immediate:true → nessuna easing, risposta 1:1 al dito
     window.__lenis.scrollTo(px, { immediate: true, duration: 0 });
@@ -261,10 +305,11 @@ const ScrollProgress = memo(() => {
       cancelAnimationFrame(recalcRaf);
       recalcRaf = requestAnimationFrame(() => { total = getTotal(); });
     };
-    // total cambia solo su resize/rotazione o quando il contenuto cresce (lazy)
+    // total cambia solo su resize/rotazione; lo ricalcoliamo anche a scroll fermo
+    // (intercetta la crescita del contenuto dai lazy-chunk) — MAI durante lo scroll.
     window.addEventListener('resize', recalcTotal, { passive: true });
-    const ro = new ResizeObserver(recalcTotal);
-    ro.observe(document.body);
+    // SCROLLER giusto: #root su touch (barra del browser FISSA), window su desktop.
+    const scroller = getScrollEl() || window;
 
     let rafId = 0;
     let pending = false;
@@ -276,7 +321,7 @@ const ScrollProgress = memo(() => {
       pending = false;
       if (total <= 0) return;
 
-      const y     = window.scrollY;
+      const y     = getScrollY();
       const raw   = y / total;
       const speed = Math.abs(y - lastY.current);
       lastY.current = y;
@@ -306,7 +351,8 @@ const ScrollProgress = memo(() => {
       // flag globale isScrolling (task 4): sollevato durante lo scroll/bounce
       window.__isScrolling = true;
       clearTimeout(scrollStop);
-      scrollStop = setTimeout(() => { window.__isScrolling = false; }, 150);
+      // a scroll fermo: rilascia il flag E ricalcola il total (1 lettura, non durante lo scroll)
+      scrollStop = setTimeout(() => { window.__isScrolling = false; total = getTotal(); }, 150);
 
       // throttle: una sola passata DOM per frame, listener non bloccante
       if (!pending) {
@@ -325,13 +371,12 @@ const ScrollProgress = memo(() => {
       }, 200);
     };
 
-    window.addEventListener('scroll', onScroll, { passive: true });
+    scroller.addEventListener('scroll', onScroll, { passive: true });
     paint(); // primo paint immediato
 
     return () => {
-      window.removeEventListener('scroll', onScroll);
+      scroller.removeEventListener('scroll', onScroll);
       window.removeEventListener('resize', recalcTotal);
-      ro.disconnect();
       cancelAnimationFrame(rafId);
       cancelAnimationFrame(recalcRaf);
       clearTimeout(idleTimer.current);
@@ -894,6 +939,9 @@ function waitForStableLayout(stableMs = 100, maxWait = 6000) {
 // Astrae lo scroll finale: usa Lenis se disponibile, nativo altrimenti.
 // È l'unico punto del codebase che deve sapere se Lenis esiste o no.
 function scrollToY(y) {
+  // TOUCH: barra fissa → lo scroll avviene dentro #root.
+  const el = getScrollEl();
+  if (el) { el.scrollTop = y; return; }
   if (window.__lenis) {
     window.__lenis.resize(); // sincronizza bounds prima dello scroll
     window.__lenis.scrollTo(y, { immediate: true, duration: 0, force: true });
