@@ -103,10 +103,12 @@ function Root() {
           // ONE driver only: the GSAP ticker. Explicitly off.
           autoRaf: false,
 
-          // Safety net for hybrid devices (Surface, iPad + keyboard):
-          // even if the coarse-pointer check is passed, touch events should
-          // not be intercepted by Lenis — let the browser handle them natively.
-          touchMultiplier: 0,
+          // ── FIX JITTER MOBILE — DISATTIVAZIONE TOUCH CORRETTA ────────────
+          // RIMOSSO: touchMultiplier: 0 (Causava la lotta contro lo scroll nativo!)
+          // AGGIUNTO: Questi due parametri spengono ufficialmente e in modo sicuro
+          // qualsiasi interferenza di Lenis con gli schermi touch.
+          smoothTouch: false,
+          syncTouch: false,
         });
 
         lenis.on('scroll', ScrollTrigger.update);
