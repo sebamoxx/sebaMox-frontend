@@ -32,6 +32,8 @@ ScrollTrigger.config({
   autoRefreshEvents: "visibilitychange,DOMContentLoaded,load" // NOTA: Manca "resize"!
 });
 
+ScrollTrigger.defaults({ scroller: "#root" });
+
 /* [2] pinType "transform" SOLO su touch — i pin di ScrollTrigger di default
    usano position:fixed, che su mobile SALTA quando la toolbar si nasconde/
    riappare (il fixed è relativo alla viewport che si ridimensiona). Con

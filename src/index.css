@@ -45,7 +45,20 @@ html {
    Fondamentale quando si usa GSAP ScrollTrigger per evitare che 
    il browser e GSAP "litighino" sulla posizione durante lo scroll su mobile. */
 html, body {
-  overflow-anchor: none !important;
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100svh;
+  overflow: hidden !important; /* Uccide lo scroll di Chrome/Safari, la barra non scompare più */
+}
+
+#root {
+  width: 100%;
+  height: 100svh;
+  overflow-y: auto; /* Riattiva lo scroll ma internamente */
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch; /* Mantiene lo scroll fluido su iPhone */
 }
 
 body {
