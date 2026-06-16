@@ -28,7 +28,9 @@ gsap.registerPlugin(ScrollTrigger);
    livello interno salta il refresh se la larghezza non cambia e l'altezza varia
    meno del 25% (la firma tipica della barra indirizzi), ma continua a
    refreshare su un vero cambio (rotazione/resize reale). */
-ScrollTrigger.config({ ignoreMobileResize: true });
+ScrollTrigger.config({ 
+  autoRefreshEvents: "visibilitychange,DOMContentLoaded,load" // NOTA: Manca "resize"!
+});
 
 /* [2] pinType "transform" SOLO su touch — i pin di ScrollTrigger di default
    usano position:fixed, che su mobile SALTA quando la toolbar si nasconde/
