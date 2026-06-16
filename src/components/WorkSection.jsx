@@ -107,13 +107,6 @@ export default function WorkSection({
     const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     const canHover      = window.matchMedia('(hover: hover) and (pointer: fine)').matches;
 
-    /* ── [VH] Fallback --real-vh per iOS Safari < 15.4 ──────────
-       (usata da .xr-section quando dvh non è supportato)         */
-    const setRealVH = () => {
-      document.documentElement.style.setProperty('--real-vh', `${window.innerHeight}px`);
-    };
-    setRealVH();
-    window.addEventListener('resize', setRealVH, { passive: true });
 
     const gsapCtx = gsap.context(() => {
 
