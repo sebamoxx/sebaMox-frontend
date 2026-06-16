@@ -1,4 +1,3 @@
-
 /* ─────────────────────────────────────────
    Reset & base
 ───────────────────────────────────────── */
@@ -8,43 +7,89 @@
   padding: 0;
 }
 
+/* FIX BANDE BIANCHE #1 — color-scheme:dark.
+   Dice al browser che la pagina è SCURA: la "canvas" di sistema (l'area di
+   overscroll/rubber-band, gli scrollbar, lo sfondo dietro la pagina) viene
+   resa scura invece che bianca. Da sola elimina gran parte delle bande bianche
+   su Chrome/Android e sugli in-app browser (Instagram/Facebook). */
+:root {
+  color-scheme: dark;
+
+  /* Safe-area (notch / barra home iOS). Valgono 0 dove non esistono → innocue
+     su Android/desktop. Usale sugli elementi FIXED con calc(... + var(--safe-*)). */
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+}
+
 html {
   scroll-behavior: auto !important;
-  overflow-anchor: none; 
   font-size: 16px;
+
+  /* FIX BANDE BIANCHE #2 — sfondo su <html>.
+     L'area di overscroll (rubber-band) e le safe-area mostrano l'elemento
+     <html>, NON <body>. Senza un background qui, Chrome iOS/Android e l'in-app
+     di Instagram mostrano BIANCO quando la pagina rimbalza o quando la toolbar
+     dinamica si nasconde/riappare. Con lo sfondo scuro su <html>: mai più bianco. */
+  background-color: #0f0a06;
+
+  /* clip (non hidden): nasconde l'overflow orizzontale senza creare uno
+     scroll-container (che romperebbe sticky/fixed e introdurrebbe jank). */
+  overflow-x: clip;
+
+  /* NIENTE height:100vh qui: il documento scrolla in modo nativo e fluido. */
+}
+
+/* FIX JANK / SALTO SCROLL — overflow-anchor mirato per device.
+   PRIMA: `overflow-anchor: none` GLOBALE disattivava lo scroll-anchoring di
+   Chrome. Quando una sezione lazy o un'immagine SOPRA il viewport finisce di
+   caricare, la posizione di scroll salta ("si sposta in alto/basso in modo
+   imprevedibile"). Safari non implementa overflow-anchor → per questo il bug
+   si vedeva SOLO su Chrome e negli in-app browser, mai su Safari.
+   ADESSO:
+   · pointer:fine (desktop, dove gira Lenis) → lo teniamo `none`: l'anchoring
+     darebbe fastidio allo smooth-scroll virtuale.
+   · pointer:coarse (mobile/touch, niente Lenis) → lo RIPRISTINIAMO `auto`:
+     scroll stabile, nessun salto quando i lazy-chunk si idratano. */
+@media (pointer: fine) {
+  html { overflow-anchor: none; }
+}
+@media (pointer: coarse) {
+  html { overflow-anchor: auto; }
 }
 
 body {
+  /* svh (small viewport height) = STABILE: NON cambia quando la toolbar mobile
+     si nasconde → niente reflow/jank. Riempie sempre almeno la viewport visibile.
+     (Per pagine più lunghe della viewport il contenuto cresce e scrolla nativo.) */
+  min-height: 100svh;
+
   background-color: #0f0a06;
   color: #F0E6D3;
   font-family: 'Outfit', 'Geist', system-ui, sans-serif !important;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  overflow-x: hidden;
-  /* Previene il rimbalzo elastico a fine pagina su mobile */
-  overscroll-behavior-y: none; 
 
+  overflow-x: clip;
+
+  /* SCROLL MOBILE NATIVO E FLUIDO (regola d'oro: non congelare il touch):
+     · overscroll-behavior-x:none → niente swipe-back orizzontale accidentale.
+     · NON impostiamo overscroll-behavior-y → lasciamo rubber-band e
+       pull-to-refresh nativi (ora rimbalzano su sfondo SCURO, non bianco).
+     · touch-action: manipulation → elimina il ritardo del double-tap-zoom,
+       lo scroll resta 1:1 col dito. NON usiamo touch-action:none (congelerebbe). */
+  overscroll-behavior-x: none;
+  touch-action: manipulation;
 }
 
-/*
-html, body {
-  overflow-x: hidden !important; 
-  width: 100%;
-  position: relative;
-   Blocca il ricalcolo fluttuante dell'altezza su Mac/PC 
-  height: auto; 
-}
-  */
-
-html, body { height: auto; min-height: 100%; }
-html, body { overflow-x: clip; } /* clip, NON hidden: non crea scroll container, non rompe sticky */
-body { overscroll-behavior-x: none; touch-action: manipulation; }
-/* NON aggiungere overscroll-behavior: none globale né touch-action: none:
-   il primo uccide pull-to-refresh/edge-swipe, il secondo è il bug appena fixato. */
-
-/* Evita il flash di contenuto non stilizzato */
+/* Contenitore root di React. svh con fallback vh per WebView datate (alcuni
+   in-app browser Android). Lo sfondo scuro di html/body copre comunque ogni
+   pixel, quindi anche dove svh non è supportato non compaiono bande bianche. */
 #root {
-  min-height: 100dvh;
+  min-height: 100vh;   /* fallback browser/WebView molto vecchi */
+  min-height: 100svh;  /* moderno e STABILE (no reflow quando la toolbar si nasconde) */
+  isolation: isolate;  /* stacking context dedicato: z-index del sito isolati */
 }
 
 /* ─────────────────────────────────────────
@@ -96,7 +141,7 @@ body { overscroll-behavior-x: none; touch-action: manipulation; }
 
 /* ─────────────────────────────────────────
    Scrollbar custom (opzionale, webkit)
-───────────────────────────────────────── 
+─────────────────────────────────────────
 ::-webkit-scrollbar { width: 6px; }
 ::-webkit-scrollbar-track { background: #0f0a06; }
 ::-webkit-scrollbar-thumb { background: rgba(244,162,97,0.3); border-radius: 3px; }
@@ -111,15 +156,15 @@ body { overscroll-behavior-x: none; touch-action: manipulation; }
 @keyframes float {
   0%, 100% { transform: translateY(0px); }
   50% { transform: translateY(-10px); }
-} */ 
+} */
 
 
 /* ─────────────────────────────────────────
    BRUTALIST CUSTOM SCROLLBAR
 ───────────────────────────────────────── */
 /* Nasconde la scrollbar nativa del browser */
-::-webkit-scrollbar { 
-  display: none; 
+::-webkit-scrollbar {
+  display: none;
   width: 0;
 }
 
@@ -576,7 +621,7 @@ body {
   z-index: 1;
   opacity: 0;
   transform: translateY(30px);
-  transition: all 0.8s cubic-bezier(0.16, 1, 0.3, 1) 0.3s, 
+  transition: all 0.8s cubic-bezier(0.16, 1, 0.3, 1) 0.3s,
               transform 0.3s cubic-bezier(0.16, 1, 0.3, 1),
               box-shadow 0.3s ease;
 }
@@ -640,4 +685,3 @@ body {
   background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
 }
 */
-

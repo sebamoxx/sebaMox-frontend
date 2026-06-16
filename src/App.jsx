@@ -440,7 +440,9 @@ const ScrollProgress = memo(() => {
         ref={timeRef}
         style={{
           position:      'fixed',
-          bottom:        'calc(1.5rem + 2.8rem)', // sopra il blocco testo
+          // SAFE-AREA: con viewport-fit=cover l'HUD fixed andrebbe sotto la barra
+          // home iOS → aggiungo env(safe-area-inset-bottom) (0 dove non esiste).
+          bottom:        'calc(1.5rem + 2.8rem + env(safe-area-inset-bottom, 0px))', // sopra il blocco testo
           right:         isActive ? '3.8rem' : '1.5rem',
           zIndex:        9999,
           fontFamily:    C.font,
@@ -465,7 +467,7 @@ const ScrollProgress = memo(() => {
         ref={textRef}
         style={{
           position:      'fixed',
-          bottom:        'calc(1.5rem + 1.4rem)', // sopra il log
+          bottom:        'calc(1.5rem + 1.4rem + env(safe-area-inset-bottom, 0px))', // sopra il log + safe-area
           right:         isActive ? '3.8rem' : '1.5rem',
           zIndex:        9999,
           fontFamily:    C.font,
@@ -488,7 +490,7 @@ const ScrollProgress = memo(() => {
         ref={logRef}
         style={{
           position:      'fixed',
-          bottom:        '1.5rem',
+          bottom:        'calc(1.5rem + env(safe-area-inset-bottom, 0px))', // safe-area barra home
           right:         isActive ? '3.8rem' : '1.5rem',
           zIndex:        9999,
           fontFamily:    C.font,
@@ -929,7 +931,11 @@ const CustomCursor = memo(() => {
    oggetto inline ricreato ad ogni render di App → nuovo riferimento → React
    ri-diffava/riapplicava lo style sul nodo <main>. Ora è un oggetto stabile e
    condiviso (stessi identici valori → ZERO modifica al design). */
-const MAIN_STYLE = { backgroundColor: '#020202', color: '#F0E6D3', minHeight: '100dvh' };
+/* FULL-BLEED FIX: 100svh (small viewport height) invece di 100dvh. dvh CAMBIA
+   quando la toolbar mobile si nasconde → reflow/jank durante lo scroll; svh è
+   STABILE e riempie comunque la viewport visibile. Lo sfondo scuro di html/body
+   (in index.css) copre ogni pixel residuo → nessuna banda bianca. */
+const MAIN_STYLE = { backgroundColor: '#020202', color: '#F0E6D3', minHeight: '100svh' };
 
 const HomePage = () => {
   const location = useLocation();
