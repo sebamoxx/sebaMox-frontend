@@ -1,0 +1,23 @@
+# robots.txt per siti professionali (SEO Standard)
+
+# 1. Permetti l'indicizzazione dei file statici (CSS, JS, Immagini)
+# Essenziale per permettere a Google di "vedere" il sito come un utente
+User-agent: *
+Allow: /static/
+Allow: /assets/
+Allow: /wp-content/uploads/
+
+# 2. Blocca percorsi di sistema o admin (evita duplicati ed errori)
+Disallow: /api/           # Se il backend Python gestisce dati sensibili
+Disallow: /auth/          # Login, signup, reset password
+Disallow: /admin/         # Pannelli di controllo
+Disallow: /config/        # Configurazioni
+Disallow: /temp/          # File temporanei
+
+# 3. Evita il crawl di parametri di ricerca (previene duplicate content)
+# Es: sito.it/search?q=abc&page=2
+Disallow: /*?q=
+Disallow: /*&q=
+
+# 4. Sitemap: Fondamentale per far trovare le tue pagine a Google
+Sitemap: https://www.tuosito.it/sitemap.xml
