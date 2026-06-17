@@ -2,6 +2,7 @@ import { useEffect, useRef, memo, useCallback } from 'react';
 import gsap from 'gsap';
 import { ScrollTrigger } from 'gsap/ScrollTrigger';
 import { Link, useNavigate } from 'react-router-dom';
+import Spline from '@splinetool/react-spline';
 import { useTransitionNavigate } from '../components/TransitionController';
 
 if (typeof window !== 'undefined') {
@@ -154,318 +155,142 @@ const FOCUS_RANGE = 420;   // |depth| entro cui un monolite è "in focus"
 const TOTAL_Z     = START + (N - 1) * SPACING; // corsa totale del mondo
 const PERSPECTIVE = 1200;  // px — BEHIND_FADE deve restare sotto questo valore
 
-/* ═══════════════════════════════════════════════════════════════
-   QUALITY GOVERNOR — stesso pattern del preloader
-═══════════════════════════════════════════════════════════════ */
-const QUALITY_TIERS = [
-  { dprCap: 2.0, particles: 120 },
-  { dprCap: 1.5, particles: 72  },
-  { dprCap: 1.0, particles: 40  },
-];
-const FRAME_WINDOW = 90;
-const FRAME_BUDGET = 19; // ms medi → oltre, si degrada di un tier
-
-/* ═══════════════════════════════════════════════════════════════
-   SPRITE GLOW PRE-RENDERIZZATI
-   ───────────────────────────────────────────────────────────────
-   createRadialGradient per frame = allocazione + costo GPU.
-   Soluzione: il bagliore viene disegnato UNA volta su un canvas
-   offscreen e poi stampato con drawImage (blit puro, economico).
-═══════════════════════════════════════════════════════════════ */
-function makeGlowSprite(size, r, g, b) {
-  const c = document.createElement('canvas');
-  c.width = c.height = size;
-  const x = c.getContext('2d');
-  const grad = x.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
-  grad.addColorStop(0.00, `rgba(${r},${g},${b},1)`);
-  grad.addColorStop(0.18, `rgba(${r},${g},${b},0.55)`);
-  grad.addColorStop(0.45, `rgba(${r},${g},${b},0.12)`);
-  grad.addColorStop(1.00, `rgba(${r},${g},${b},0)`);
-  x.fillStyle = grad;
-  x.fillRect(0, 0, size, size);
-  return c;
-}
-
-/* ═══════════════════════════════════════════════════════════════
-   SINGULARITY — Canvas 2D fisso al centro della scena
-   ───────────────────────────────────────────────────────────────
-   props (refs numerici, MAI state → zero re-render React):
-   - speedRef : 0..1, velocità di scroll normalizzata e smorzata
-   - reduced  : prefers-reduced-motion → frame statico
-═══════════════════════════════════════════════════════════════ */
 /* ════════════════════════════════════════════════════════════════════
-   SINGULARITY v2 — "THE VOID CORE" (Buco Nero Geometrico)
+   CORE SPLINE — scena 3D al centro del tunnel (sostituisce Singularity)
    ────────────────────────────────────────────────────────────────────
-   ISTRUZIONI: questo blocco SOSTITUISCE integralmente il componente
-   `Singularity` dentro WorksArchive.jsx (da `const Singularity = memo`
-   fino alla chiusura `});`). Usa gli stessi helper module-scope già
-   presenti nel file: T, QUALITY_TIERS, FRAME_WINDOW, FRAME_BUDGET,
-   makeGlowSprite, memo/useRef/useEffect.
+   ┌──────────────────────────────────────────────────────────────────┐
+   │  👉  CONFIGURAZIONE — DEVI MODIFICARE SOLO QUESTE DUE STRINGHE  👈 │
+   └──────────────────────────────────────────────────────────────────┘
+     • SPLINE_SCENE_URL   : l'URL .splinecode esportato da Spline
+                            (Export → "Code / React" → copia l'URL che
+                            finisce con `…/scene.splinecode`).
+     • TARGET_OBJECT_NAME : il nome ESATTO dell'oggetto da animare, così
+                            come appare nel pannello Objects di Spline
+                            (es. 'Microchip', 'Core', 'Cube'…).
 
-   COSA CAMBIA RISPETTO ALLA v1:
-   - ELIMINATO il pilastro di luce verticale (pillarGrad e relativo
-     fillRect) — via anche dal setup().
-   - ELIMINATI coreSprite (il nucleo non è più luce ma assenza),
-     TILT, SQUASH e drawDiskHalf (niente più disco ellittico).
-   - NUOVO centro: un cerchio nero assoluto (#050505) che COPRE
-     tutto ciò che gli passa sotto → nucleo impenetrabile.
-   - NUOVI anelli concentrici hairline (1px), alcuni spezzati via
-     dash-array, in rotazione lenta (lineDashOffset — vedi nota).
-   - Particelle in orbita perfettamente CIRCOLARE attorno al Void,
-     che sfumano verso l'esterno, con scia tangenziale + centrifuga
-     proporzionale alla velocità di scroll.
+   COME FUNZIONA (il resto è già pronto, non serve toccarlo):
+   - <Spline onLoad> salva l'istanza dell'app in `splineAppRef`.
+   - Un singolo gsap.ticker legge `speedRef.current` (velocity di scroll
+     normalizzata 0..1, calcolata nel Main) e applica un "tilt magnetico"
+     + una rotazione continua all'oggetto target → fisicità allo scroll.
+   - Un IntersectionObserver fa da KILL-SWITCH: quando la sezione esce
+     dalla viewport, il ticker GSAP viene SCOLLEGATO (zero lavoro CPU/GPU
+     speso a muovere una scena che nessuno vede). Rientrando, si riattacca.
 
-   INVARIATI: Quality Governor, resize intelligente, reduced-motion,
-   inerzia di speedRef, cleanup. Zero WebGL, singolo Canvas 2D.
-════════════════════════════════════════════════════════════════════ */
-const Singularity = memo(({ speedRef, reduced }) => {
-  const cvRef = useRef(null);
+   props:
+   - speedRef : useRef numerico (0..1) — MAI state, zero re-render React
+   - reduced  : prefers-reduced-motion → nessuna animazione di tilt
+═══════════════════════════════════════════════════════════════════════ */
 
+/* ▼▼▼ INSERISCI QUI I TUOI VALORI ▼▼▼ */
+const SPLINE_SCENE_URL   = 'https://prod.spline.design/QresRyIZehUKtfON/scene.splinecode';
+const TARGET_OBJECT_NAME = 'Battery';
+/* ▲▲▲ INSERISCI QUI I TUOI VALORI ▲▲▲ */
+
+const CoreSpline = memo(({ speedRef, reduced }) => {
+  const wrapRef       = useRef(null); // wrapper osservato dall'IntersectionObserver
+  const splineAppRef  = useRef(null); // istanza dell'app Spline (salvata in onLoad)
+  const targetObjRef  = useRef(null); // oggetto 3D risolto via findObjectByName
+
+  /* onLoad: Spline è pronto → memorizza l'app e pre-risolve l'oggetto.
+     (Se il nome non esiste, targetObjRef resta null e il ticker non fa
+      nulla: nessun crash, la scena resta comunque visibile.)            */
+  const handleLoad = (app) => {
+    splineAppRef.current = app;
+    targetObjRef.current = app.findObjectByName(TARGET_OBJECT_NAME) || null;
+  };
+
+  /* ── TICKER GSAP + KILL-SWITCH IntersectionObserver ─────────────────
+     L'observer NON si limita a un flag: aggancia/sgancia fisicamente il
+     ticker dal loop di GSAP. Fuori viewport = zero callback per frame.  */
   useEffect(() => {
-    const cv = cvRef.current;
-    if (!cv) return;
-    const ctx = cv.getContext('2d', { alpha: true }); // sopra il nero della sezione
+    if (reduced) return;            // reduced-motion: scena statica, niente tilt
+    const el = wrapRef.current;
+    if (!el) return;
 
-    /* ── Governor state (invariato) ─────────────────────────── */
-    const isMobile = window.innerWidth < 768;
-    let tierIdx = isMobile ? 1 : 0;
-    let tier    = QUALITY_TIERS[tierIdx];
-    let frameAcc = 0, frameCount = 0;
+    let curTiltX = 0;  // tilt corrente smorzato (asse X — "becca/alza il muso")
+    let curTiltY = 0;  // tilt corrente smorzato (asse Y — "sterza")
+    let spin     = 0;  // rotazione continua accumulata sull'asse Y
 
-    let W = 0, H = 0, dpr = 1;
-
-    /* ── Unico sprite superstite: alone ambra tenue di profondità.
-       Il Void non emette luce — l'alone è il "calore" residuo dello
-       spazio attorno, quasi impercettibile.                       */
-    const haloSprite = makeGlowSprite(256, 216, 156, 74);
-
-    /* ── ANELLI CONCENTRICI — configurazione statica ──────────
-       m     : moltiplicatore del raggio del Void
-       dash  : [tratto, vuoto] in px — null = anello pieno
-       color : colore hairline
-       speed : velocità/direzione di rotazione del pattern dash
-               (gli anelli pieni non ruotano: sono invarianti)    */
-    const RINGS = [
-      { m: 1.00, dash: null,     color: T.boneDim,    baseA: 0.16, speed:  0    }, // event horizon (bordo del Void)
-      { m: 1.22, dash: [2, 10],  color: T.boneDim,    baseA: 0.30, speed:  0.22 }, // punteggiato fine, orario
-      { m: 1.45, dash: [46, 30], color: T.amberGhost, baseA: 0.85, speed: -0.14 }, // segmenti lunghi, antiorario
-      { m: 1.78, dash: [1, 16],  color: T.amberGhost, baseA: 0.60, speed:  0.08 }, // pulviscolo radente, lentissimo
-    ];
-
-    /* ── PARTICELLE — orbita circolare attorno al Void ────────
-       pA = angolo orbitale corrente (rad)
-       p01 = raggio normalizzato 0..1 → mappato fuori dal Void
-       pS = velocità angolare: ∝ 1/√r ("Keplero" — le orbite
-            interne sono più veloci, come un vero disco)
-       pZ = peso individuale (varia la lunghezza della scia)      */
-    const MAX_P = QUALITY_TIERS[0].particles;
-    const pA  = new Float32Array(MAX_P);
-    const p01 = new Float32Array(MAX_P);
-    const pS  = new Float32Array(MAX_P);
-    const pZ  = new Float32Array(MAX_P);
-    for (let i = 0; i < MAX_P; i++) {
-      pA[i]  = Math.random() * Math.PI * 2;
-      p01[i] = Math.random();                                  // 0 = bordo Void, 1 = esterno
-      pS[i]  = (0.25 + Math.random() * 0.45) / Math.sqrt(1 + p01[i] * 1.4)
-               * (Math.random() > 0.85 ? -1 : 1);              // ~15% controrotanti
-      pZ[i]  = 0.8 + Math.random() * 1.2;
-    }
-
-    const setup = () => {
-      W   = window.innerWidth;
-      H   = window.innerHeight;
-      dpr = Math.min(window.devicePixelRatio || 1, tier.dprCap);
-      cv.width  = Math.floor(W * dpr);
-      cv.height = Math.floor(H * dpr);
-      ctx.setTransform(1, 0, 0, 1, 0, 0);
-      ctx.scale(dpr, dpr);
-      /* NOTA: niente più pillarGrad qui — eliminato col pilastro */
-    };
-    setup();
-
-    let raf = 0, prevTs = 0;
-    let ringPhase = 0; // accumulatore di rotazione del pattern dash
-    let breath    = 0; // respiro lentissimo degli anelli
-    let sp = 0;        // velocità smorzata (inerzia: si raffredda da solo)
-
-    const draw = (ts) => {
-      raf = requestAnimationFrame(draw);
-      if (!prevTs) prevTs = ts;
-      const dt = Math.min((ts - prevTs) / 1000, 0.05);
-      prevTs = ts;
-
-      /* ── Governor (invariato) ─────────────────────────────── */
-      frameAcc += dt * 1000;
-      frameCount++;
-      if (frameCount >= FRAME_WINDOW) {
-        const avg = frameAcc / frameCount;
-        frameAcc = 0; frameCount = 0;
-        if (avg > FRAME_BUDGET && tierIdx < QUALITY_TIERS.length - 1) {
-          tierIdx++;
-          tier = QUALITY_TIERS[tierIdx];
-          setup();
-        }
+    /* Letto ogni frame finché il ticker è agganciato. */
+    const tick = () => {
+      const app = splineAppRef.current;
+      if (!app) return;
+      /* Risoluzione lazy: se onLoad non ha trovato l'oggetto subito,
+         ritenta finché non compare (scene con caricamento progressivo). */
+      if (!targetObjRef.current) {
+        targetObjRef.current = app.findObjectByName(TARGET_OBJECT_NAME) || null;
       }
+      const obj = targetObjRef.current;
+      if (!obj) return;
 
-      /* ── Inerzia: sp insegue speedRef, accende veloce (×9) e
-         si raffredda lento (×2.2) — il Void "digerisce" l'energia */
-      const target = Math.min(Math.abs(speedRef.current), 1);
-      sp += (target - sp) * Math.min(1, dt * (target > sp ? 9 : 2.2));
+      /* velocity normalizzata 0..1 (il segno lo recupero dal raw value) */
+      const raw = speedRef.current;
+      const v   = Math.min(Math.abs(raw), 1);
 
-      ctx.clearRect(0, 0, W, H);
+      /* TILT MAGNETICO: bersaglio proporzionale alla velocità, raggiunto
+         con un lerp (×0.08) → inerzia morbida, mai scatti. ~0.45 rad max. */
+      const targetX = v * 0.45 * (raw < 0 ? -1 : 1); // direzione = verso di scroll
+      const targetY = v * 0.30 * (raw < 0 ? -1 : 1);
+      curTiltX += (targetX - curTiltX) * 0.08;
+      curTiltY += (targetY - curTiltY) * 0.08;
 
-      const cx = W * 0.5;
-      const cy = H * 0.5;
-      /* Raggio del Void: 15% del lato corto del viewport →
-         su mobile portrait si aggancia alla larghezza e resta
-         sempre proporzionato, mai invadente.                    */
-      const voidR = Math.min(W, H) * 0.15;
+      /* ROTAZIONE CONTINUA: gira sempre piano (idle) e accelera con lo
+         scroll → il chip "sente" la velocità del volo lungo l'asse Z.   */
+      spin += 0.0015 + v * 0.05;
 
-      /* Avanzamento orbite: a riposo lente (0.3 rad/s di base),
-         in scroll veloce fino a ~3.8× — il fattore pS[i] individuale
-         mantiene il differenziale kepleriano tra le orbite        */
-      const adv = dt * (0.30 + sp * 3.5);
-      const nP = tier.particles;
-      for (let i = 0; i < nP; i++) pA[i] += adv * pS[i];
-
-      /* Rotazione del pattern degli anelli: stessa filosofia —
-         lenta a riposo, furiosa sotto scroll                     */
-      ringPhase += dt * (1 + sp * 7);
-      breath    += dt * 0.5;
-      /* Respiro: ±1.2% sul raggio degli anelli, periodo ~12.5s —
-         sotto la soglia di attenzione cosciente, sopra quella
-         della sensazione di "vivo"                               */
-      const breathScale = 1 + Math.sin(breath) * 0.012;
-
-      /* ════ 1 · ALONE DI PROFONDITÀ (dietro a tutto) ═════════
-         Ambra quasi subliminale: 4% a riposo, 12% a piena velocità.
-         Niente "luce esplosiva" — è temperatura, non emissione.  */
-      const haloR = voidR * 3.2;
-      ctx.globalAlpha = 0.04 + sp * 0.08;
-      ctx.drawImage(haloSprite, cx - haloR, cy - haloR, haloR * 2, haloR * 2);
-
-      /* ════ 2 · EVENT HORIZON PARTICLES ══════════════════════
-         Orbita circolare pura: P = C + r·(cos a, sin a).
-         Raggio: r = voidR · (1.1 + p01·1.3) → fascia 1.1–2.4 voidR,
-         SEMPRE fuori dal Void.
-         Scia = tangente + componente centrifuga:
-           tangente  t̂ = (-sin a, cos a)·segno(velocità orbitale)
-           radiale   r̂ = (cos a, sin a)
-           scia = t̂·(1 + sp·14·pZ) + r̂·(sp²·22)
-         La parte radiale cresce col QUADRATO di sp → a bassa
-         velocità la scia è puramente orbitale (elegante), in
-         scroll violento le particelle "sbavano" verso l'esterno
-         come materia strappata via dalla centrifuga.             */
-      ctx.lineWidth = 1;
-      ctx.strokeStyle = T.amber;
-      for (let i = 0; i < nP; i++) {
-        const a    = pA[i];
-        const cosA = Math.cos(a);
-        const sinA = Math.sin(a);
-        const r    = voidR * (1.1 + p01[i] * 1.3);
-        const x    = cx + cosA * r;
-        const y    = cy + sinA * r;
-
-        const dir  = pS[i] >= 0 ? 1 : -1;          // verso orbitale
-        const stT  = 1 + sp * 14 * pZ[i];          // stretch tangenziale (motion blur)
-        const stR  = sp * sp * 22;                  // smear centrifugo (quadratico)
-
-        /* Alpha: sfuma verso l'esterno (1−p01·0.72) e si accende
-           con la velocità (0.35→1.0)                             */
-        ctx.globalAlpha = (0.14 + 0.38 * (1 - p01[i] * 0.72)) * (0.35 + sp * 0.65);
-        ctx.beginPath();
-        ctx.moveTo(x, y);
-        ctx.lineTo(
-          x + (-sinA * dir) * stT + cosA * stR,
-          y + ( cosA * dir) * stT + sinA * stR
-        );
-        ctx.stroke();
-      }
-
-      /* ════ 3 · THE VOID — il cerchio nero assoluto ══════════
-         Disegnato DOPO alone e particelle: qualsiasi scia che
-         smeari verso l'interno viene inghiottita → l'illusione
-         di un nucleo impenetrabile è geometricamente garantita. */
-      ctx.globalAlpha = 1;
-      ctx.fillStyle = T.void;
-      ctx.beginPath();
-      ctx.arc(cx, cy, voidR, 0, Math.PI * 2);
-      ctx.fill();
-
-      /* ════ 4 · ANELLI CONCENTRICI (sopra il Void) ═══════════
-         La "rotazione" degli anelli spezzati è lineDashOffset:
-         far scorrere il pattern lungo la circonferenza È una
-         rotazione, senza translate/rotate del contesto (un arc
-         è invariante per rotazione — costo: zero trasformazioni).
-         offset = fase · velocità · 60px (60 ≈ px di pattern/sec) */
-      for (let k = 0; k < RINGS.length; k++) {
-        const ring = RINGS[k];
-        const rr = voidR * ring.m * breathScale;
-        ctx.globalAlpha = ring.baseA * (0.7 + sp * 0.9); // si accendono in velocità
-        ctx.strokeStyle = ring.color;
-        if (ring.dash) {
-          ctx.setLineDash(ring.dash);
-          ctx.lineDashOffset = ringPhase * ring.speed * 60;
-        } else {
-          ctx.setLineDash([]);
-        }
-        ctx.beginPath();
-        ctx.arc(cx, cy, rr, 0, Math.PI * 2);
-        ctx.stroke();
-      }
-      ctx.setLineDash([]); // reset: non sporcare il prossimo frame
-      ctx.globalAlpha = 1;
+      /* L'API di Spline espone rotation in RADIANTI sui tre assi. */
+      obj.rotation.x = curTiltX;
+      obj.rotation.y = spin + curTiltY;
     };
 
-    if (reduced) {
-      draw(16);                  // un solo frame statico
-      cancelAnimationFrame(raf);
-    } else {
-      raf = requestAnimationFrame(draw);
-    }
-
-    /* ── Resize intelligente (invariato) ─────────────────────── */
-    let prevW = window.innerWidth;
-    let prevOrient = window.innerWidth > window.innerHeight ? 'l' : 'p';
-    let resizeTimer = 0;
-    const handleResize = () => {
-      const nw = window.innerWidth;
-      const no = window.innerWidth > window.innerHeight ? 'l' : 'p';
-      if (Math.abs(nw - prevW) <= 30 && no === prevOrient) return;
-      clearTimeout(resizeTimer);
-      resizeTimer = setTimeout(() => {
-        prevW = nw; prevOrient = no;
-        setup();
-        if (reduced) draw(16);
-      }, 200);
+    let attached = false;
+    const attach = () => { 
+      if (!attached) { 
+        gsap.ticker.add(tick); 
+        el.style.visibility = 'visible'; // <-- SVEGLIA LA GPU
+        attached = true;  
+      } 
+    };
+    const detach = () => { 
+      if (attached) { 
+        gsap.ticker.remove(tick); 
+        el.style.visibility = 'hidden'; // <-- IL VERO HARDWARE KILL-SWITCH
+        attached = false; 
+      } 
     };
 
-    let ro = null;
-    if (typeof ResizeObserver !== 'undefined') {
-      ro = new ResizeObserver(handleResize);
-      ro.observe(document.documentElement);
-    } else {
-      window.addEventListener('resize', handleResize, { passive: true });
-    }
+    const io = new IntersectionObserver(
+      ([entry]) => { entry.isIntersecting ? attach() : detach(); },
+      { threshold: 0.01 } // basta un pixel visibile per riaccendere
+    );
+    io.observe(el);
 
     return () => {
-      cancelAnimationFrame(raf);
-      clearTimeout(resizeTimer);
-      if (ro) ro.disconnect();
-      else window.removeEventListener('resize', handleResize);
+      detach();
+      io.disconnect();
     };
   }, [speedRef, reduced]);
 
+  /* Wrapper: stessi position/inset/zIndex del vecchio <canvas> della
+     Singularity → resta SOTTO i monoliti (.zg-viewport ha z-index 4)
+     e sopra il fondo nero della sezione.                              */
   return (
-    <canvas
-      ref={cvRef}
+    <div
+      ref={wrapRef}
       aria-hidden
       style={{
         position: 'absolute', inset: 0,
         width: '100%', height: '100%',
         zIndex: 2, pointerEvents: 'none',
       }}
-    />
+    >
+      <Spline
+        scene={SPLINE_SCENE_URL}
+        onLoad={handleLoad}
+        style={{ width: '100%', height: '100%' }}
+      />
+    </div>
   );
 });
 
@@ -751,8 +576,8 @@ export default function WorksArchive() {
       {/* ── LAYER STICKY: la "camera" ─────────────────────────── */}
       <div className="zg-camera">
 
-        {/* Singolarità — fissa al centro, sotto i monoliti */}
-        <Singularity speedRef={speedRef} reduced={reducedMotion} />
+        {/* Core Spline — scena 3D fissa al centro, sotto i monoliti */}
+        <CoreSpline speedRef={speedRef} reduced={reducedMotion} />
 
         {/* Vignettatura statica */}
         <div aria-hidden style={{
