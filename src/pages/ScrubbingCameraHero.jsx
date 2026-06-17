@@ -221,18 +221,25 @@ export default function ScrubbingWatchHero() {
 
   const s = {
     section: {
-      position: "relative", //[cite: 3]
-      width: "100%", //[cite: 3]
-      height: "100svh", //[cite: 3]
-      background: colors.dark, //[cite: 3]
-      overflow: "hidden", //[cite: 3]
+      position: "relative",
+      width: "100%",
+      height: "750svh",   // 100svh (stage) + 650svh di corsa = stesso "pin" di +650%
+      background: colors.dark,
+    },
+    stage: {              // 👈 NUOVO: resta a schermo via sticky (compositor)
+      position: "sticky",
+      top: 0,
+      height: "100svh",
+      width: "100%",
+      overflow: "hidden",
+      background: colors.dark,
+      willChange: "transform",          // hint #3: layer dedicato GPU
+      backfaceVisibility: "hidden",
+      WebkitBackfaceVisibility: "hidden",
     },
     canvas: {
-      position: "absolute", //[cite: 3]
-      inset: 0, //[cite: 3]
-      width: "100%", //[cite: 3]
-      height: "100%", //[cite: 3]
-      display: "block", //[cite: 3]
+      position: "absolute", inset: 0, width: "100%", height: "100%",
+      display: "block", transform: "translateZ(0)",   // hint #3: canvas su layer GPU
     },
     overlay: {
       position: "absolute", //[cite: 3]
@@ -481,7 +488,7 @@ export default function ScrubbingWatchHero() {
 
         /* dvh where supported — prevents iOS Safari viewport jump */
         @supports (height: 100svh) {
-          .aeon-hero-section { height: 100svh !important; }
+          .aeon-hero-stage { height: 100svh !important; }
         }
 
         /* Mobile portrait refinements */
