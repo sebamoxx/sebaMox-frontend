@@ -50,237 +50,164 @@ export default function ScrubbingWatchHero() {
   const sizeRef = useRef({ w: 0, h: 0 }); //[cite: 3]
 
   useEffect(() => {
-    const canvas = canvasRef.current; //[cite: 3]
-    const ctx = canvas.getContext("2d"); //[cite: 3]
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext("2d");
 
     /* ─────────────────────────────────────────────
-       CANVAS — DPR-aware sizing[cite: 3]
+       CANVAS — DPR-aware sizing
     ───────────────────────────────────────────── */
     const resizeCanvas = () => {
-      const dpr = Math.min(window.devicePixelRatio || 1, 2); // cap at 2 for perf[cite: 3]
-      const w = canvas.clientWidth; //[cite: 3]
-      const h = canvas.clientHeight; //[cite: 3]
-      canvas.width = Math.round(w * dpr); //[cite: 3]
-      canvas.height = Math.round(h * dpr); //[cite: 3]
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0); //[cite: 3]
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      const w = canvas.clientWidth;
+      const h = canvas.clientHeight;
+      canvas.width = Math.round(w * dpr);
+      canvas.height = Math.round(h * dpr);
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-      // Anti-aliasing per dettagli perfetti sui micro-ingranaggi[cite: 3]
-      ctx.imageSmoothingEnabled = true; //[cite: 3]
-      ctx.imageSmoothingQuality = 'high'; //[cite: 3]
+      ctx.imageSmoothingEnabled = 'high';
+      // RIMOSSO quality='high' (su mobile fa fondere la CPU ricalcolando 240 frame ad altissima risoluzione)
       
-      sizeRef.current = { w, h }; //[cite: 3]
-      renderFrame(); // repaint immediately — zero flicker on resize[cite: 3]
+      sizeRef.current = { w, h };
+      renderFrame();
     };
 
     /* ─────────────────────────────────────────────
-       RENDER — "object-fit: contain" via drawImage math.[cite: 3]
+       RENDER — "object-fit: contain" via drawImage
     ───────────────────────────────────────────── */
     const renderFrame = () => {
-      const i = Math.round(playheadRef.current.frame); //[cite: 3]
-      const img = imagesRef.current[i]; //[cite: 3]
-      if (!img || !img.complete || !img.naturalWidth) return; //[cite: 3]
+      const i = Math.round(playheadRef.current.frame);
+      const img = imagesRef.current[i];
+      if (!img || !img.complete || !img.naturalWidth) return;
 
-      const { w, h } = sizeRef.current; //[cite: 3]
-      const scale = Math.min(w / img.naturalWidth, h / img.naturalHeight); //[cite: 3]
-      const dw = img.naturalWidth * scale; //[cite: 3]
-      const dh = img.naturalHeight * scale; //[cite: 3]
-      const dx = (w - dw) / 2; //[cite: 3]
-      const dy = (h - dh) / 2; //[cite: 3]
+      const { w, h } = sizeRef.current;
+      const scale = Math.min(w / img.naturalWidth, h / img.naturalHeight);
+      const dw = img.naturalWidth * scale;
+      const dh = img.naturalHeight * scale;
+      const dx = (w - dw) / 2;
+      const dy = (h - dh) / 2;
 
-      ctx.clearRect(0, 0, w, h); //[cite: 3]
-      ctx.drawImage(img, dx, dy, dw, dh); //[cite: 3]
+      ctx.clearRect(0, 0, w, h);
+      ctx.drawImage(img, dx, dy, dw, dh);
 
-      if (hudFrameRef.current) { //[cite: 3]
-        hudFrameRef.current.textContent = `CALIBRE 7X — FR ${String(i + 1).padStart( //[cite: 3]
-          3,
-          "0"
-        )} / ${FRAME_COUNT}`; //[cite: 3]
+      if (hudFrameRef.current) {
+        hudFrameRef.current.textContent = `CALIBRE 7X — FR ${String(i + 1).padStart(3,"0")} / ${FRAME_COUNT}`;
       }
-      if (hudBarRef.current) { //[cite: 3]
-        hudBarRef.current.style.transform = `scaleX(${ //[cite: 3]
-          (i + 1) / FRAME_COUNT //[cite: 3]
-        })`;
+      if (hudBarRef.current) {
+        hudBarRef.current.style.transform = `scaleX(${(i + 1) / FRAME_COUNT})`;
       }
     };
 
     /* ─────────────────────────────────────────────
-       PRELOAD — prioritized streaming[cite: 3]
+       PRELOAD — prioritized streaming
     ───────────────────────────────────────────── */
-    let settled = 0; //[cite: 3]
+    let settled = 0;
     const onSettle = () => {
-      settled += 1; //[cite: 3]
-      const pct = Math.round((settled / FRAME_COUNT) * 100); //[cite: 3]
-      if (loaderPctRef.current) { //[cite: 3]
-        loaderPctRef.current.textContent = `ASSEMBLING CALIBRE — ${pct}%`; //[cite: 3]
+      settled += 1;
+      const pct = Math.round((settled / FRAME_COUNT) * 100);
+      if (loaderPctRef.current) {
+        loaderPctRef.current.textContent = `ASSEMBLING CALIBRE — ${pct}%`;
       }
-      if (settled === FRAME_COUNT && loaderRef.current) { //[cite: 3]
-        gsap.to(loaderRef.current, { //[cite: 3]
-          autoAlpha: 0, //[cite: 3]
+      if (settled === FRAME_COUNT && loaderRef.current) {
+        gsap.to(loaderRef.current, {
+          autoAlpha: 0,
           duration: 1.2,
-          ease: "power2.out", //[cite: 3]
+          ease: "power2.out",
         });
-        ScrollTrigger.refresh(); //[cite: 3]
+        // ❌ ScrollTrigger.refresh() RIMOSSO: Evita il congelamento dello scroll in fase di swipe!
       }
     };
 
-    for (let i = 0; i < FRAME_COUNT; i++) { //[cite: 3]
-      const img = new Image(); //[cite: 3]
-      img.decoding = "async"; //[cite: 3]
-      if ("fetchPriority" in img) img.fetchPriority = i < 12 ? "high" : "low"; //[cite: 3]
-      img.onload = () => { //[cite: 3]
-        if (i === 0) renderFrame(); //[cite: 3]
-        onSettle(); //[cite: 3]
+    for (let i = 0; i < FRAME_COUNT; i++) {
+      const img = new Image();
+      img.decoding = "async";
+      if ("fetchPriority" in img) img.fetchPriority = i < 12 ? "high" : "low";
+      img.onload = () => {
+        if (i === 0) renderFrame();
+        onSettle();
       };
-      img.onerror = onSettle; //[cite: 3]
-      img.src = framePath(i); //[cite: 3]
-      imagesRef.current[i] = img; //[cite: 3]
+      img.onerror = onSettle;
+      img.src = framePath(i);
+      imagesRef.current[i] = img;
     }
 
-    resizeCanvas(); //[cite: 3]
-    window.addEventListener("resize", resizeCanvas); //[cite: 3]
+    resizeCanvas();
+    window.addEventListener("resize", resizeCanvas);
 
     /* ─────────────────────────────────────────────
-       MAGNETIC CTA — pointer-tracked spring physics[cite: 3]
+       MAGNETIC CTA
     ───────────────────────────────────────────── */
-    const btn = ctaButtonRef.current; //[cite: 3]
-    const magnetX = gsap.quickTo(btn, "x", { duration: 0.6, ease: "power3" }); //[cite: 3]
-    const magnetY = gsap.quickTo(btn, "y", { duration: 0.6, ease: "power3" }); //[cite: 3]
+    const btn = ctaButtonRef.current;
+    const magnetX = gsap.quickTo(btn, "x", { duration: 0.6, ease: "power3" });
+    const magnetY = gsap.quickTo(btn, "y", { duration: 0.6, ease: "power3" });
 
     const onBtnMove = (e) => {
-      const r = btn.getBoundingClientRect(); //[cite: 3]
-      magnetX((e.clientX - (r.left + r.width / 2)) * 0.25); // Movimento più elegante e pesante
+      const r = btn.getBoundingClientRect();
+      magnetX((e.clientX - (r.left + r.width / 2)) * 0.25);
       magnetY((e.clientY - (r.top + r.height / 2)) * 0.25);
     };
     const onBtnLeave = () => {
-      gsap.to(btn, { x: 0, y: 0, duration: 0.9, ease: "elastic.out(1, 0.5)" }); //[cite: 3]
+      gsap.to(btn, { x: 0, y: 0, duration: 0.9, ease: "elastic.out(1, 0.5)" });
     };
-    btn.addEventListener("pointermove", onBtnMove); //[cite: 3]
-    btn.addEventListener("pointerleave", onBtnLeave); //[cite: 3]
+    btn.addEventListener("pointermove", onBtnMove);
+    btn.addEventListener("pointerleave", onBtnLeave);
 
     /* ─────────────────────────────────────────────
-       GSAP CONTEXT — timeline + ScrollTrigger[cite: 3]
+       GSAP CONTEXT — timeline + ScrollTrigger
     ───────────────────────────────────────────── */
-    const gsapCtx = gsap.context(() => { //[cite: 3]
-      gsap.set([opticsBlockRef.current, ctaBlockRef.current], { //[cite: 3]
-        autoAlpha: 0, //[cite: 3]
-      });
-      gsap.set(titleBlockRef.current, { autoAlpha: 1 }); //[cite: 3]
+    const gsapCtx = gsap.context(() => {
+      gsap.set([opticsBlockRef.current, ctaBlockRef.current], { autoAlpha: 0 });
+      gsap.set(titleBlockRef.current, { autoAlpha: 1 });
 
-      const tl = gsap.timeline({ //[cite: 3]
-        defaults: { ease: "none" }, //[cite: 3]
-        scrollTrigger: { //[cite: 3]
-          trigger: sectionRef.current, //[cite: 3]
-          start: "top top", //[cite: 3]
-          end: SCRUB_LENGTH, //[cite: 3]
-          pin: true, //[cite: 3]
-          scrub: 1.2, //[cite: 3]
-          anticipatePin: 1, //[cite: 3]
-          invalidateOnRefresh: true, //[cite: 3]
+      const isTouch = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
+      const mainScroller = isTouch ? document.getElementById('root') : window;
+
+      const tl = gsap.timeline({
+        defaults: { ease: "none" },
+        scrollTrigger: {
+          trigger: sectionRef.current,
+          scroller: mainScroller,
+          pinType: isTouch ? "transform" : "fixed", // 👈 Sincronizzato con App.jsx
+          start: "top top",
+          end: SCRUB_LENGTH,
+          pin: true,
+          scrub: 1.4, 
+          anticipatePin: 1,
+          fastScrollEnd: true, // 👈 Previene loop se swipi fortissimo su mobile
+          invalidateOnRefresh: true,
         },
       });
 
       /* ── CANVAS SCRUB · 0% → 100% ───────────── */
       tl.to(
-        playheadRef.current, //[cite: 3]
-        {
-          frame: FRAME_COUNT - 1, //[cite: 3]
-          duration: 100, //[cite: 3]
-          snap: "frame", //[cite: 3]
-          onUpdate: renderFrame, //[cite: 3]
-        },
-        0 //[cite: 3]
+        playheadRef.current,
+        { frame: FRAME_COUNT - 1, duration: 100, snap: "frame", onUpdate: renderFrame },
+        0
       );
 
       /* ── ACT I · 0–20% ──── */
-      tl.to(
-        titleBlockRef.current, //[cite: 3]
-        { yPercent: -15, duration: 20, ease: "none" }, //[cite: 3]
-        0 //[cite: 3]
-      );
-      tl.to(
-        titleBlockRef.current, //[cite: 3]
-        {
-          autoAlpha: 0, //[cite: 3]
-          filter: "blur(12px)", //[cite: 3]
-          duration: 10,
-          ease: "power2.in", //[cite: 3]
-        },
-        16 //[cite: 3]
-      );
-
-      tl.to(scrollHintRef.current, { autoAlpha: 0, duration: 5 }, 1); //[cite: 3]
+      tl.to(titleBlockRef.current, { yPercent: -15, duration: 20, ease: "none" }, 0);
+      tl.to(titleBlockRef.current, { autoAlpha: 0, filter: "blur(12px)", duration: 10, ease: "power2.in" }, 16);
+      tl.to(scrollHintRef.current, { autoAlpha: 0, duration: 5 }, 1);
 
       /* ── ACT II · 30–60% ── */
-      tl.fromTo(
-        opticsBlockRef.current, //[cite: 3]
-        { autoAlpha: 0, y: 50, filter: "blur(15px)" },
-        {
-          autoAlpha: 1, //[cite: 3]
-          y: 0, //[cite: 3]
-          filter: "blur(0px)", //[cite: 3]
-          duration: 12,
-          ease: "power3.out", //[cite: 3]
-        },
-        30 //[cite: 3]
-      );
-      tl.fromTo(
-        opticsBlockRef.current.querySelectorAll("[data-spec]"), //[cite: 3]
-        { autoAlpha: 0, x: 20 },
-        {
-          autoAlpha: 1, //[cite: 3]
-          x: 0, //[cite: 3]
-          duration: 8,
-          stagger: 3,
-          ease: "power2.out", //[cite: 3]
-        },
-        34 //[cite: 3]
-      );
-      tl.to(
-        opticsBlockRef.current, //[cite: 3]
-        { yPercent: -8, duration: 24, ease: "none" }, //[cite: 3]
-        34 //[cite: 3]
-      );
-      tl.to(
-        opticsBlockRef.current, //[cite: 3]
-        {
-          autoAlpha: 0, //[cite: 3]
-          filter: "blur(12px)", //[cite: 3]
-          duration: 8,
-          ease: "power2.in", //[cite: 3]
-        },
-        58 //[cite: 3]
-      );
+      tl.fromTo(opticsBlockRef.current, { autoAlpha: 0, y: 50, filter: "blur(15px)" }, { autoAlpha: 1, y: 0, filter: "blur(0px)", duration: 12, ease: "power3.out" }, 30);
+      tl.fromTo(opticsBlockRef.current.querySelectorAll("[data-spec]"), { autoAlpha: 0, x: 20 }, { autoAlpha: 1, x: 0, duration: 8, stagger: 3, ease: "power2.out" }, 34);
+      tl.to(opticsBlockRef.current, { yPercent: -8, duration: 24, ease: "none" }, 34);
+      tl.to(opticsBlockRef.current, { autoAlpha: 0, filter: "blur(12px)", duration: 8, ease: "power2.in" }, 58);
 
       /* ── ACT III · 70–100% ── */
-      tl.fromTo(
-        ctaBlockRef.current, //[cite: 3]
-        { autoAlpha: 0, y: 40, filter: "blur(10px)" }, //[cite: 3]
-        {
-          autoAlpha: 1, //[cite: 3]
-          y: 0, //[cite: 3]
-          filter: "blur(0px)", //[cite: 3]
-          duration: 12, //[cite: 3]
-          ease: "power3.out", //[cite: 3]
-        },
-        70 //[cite: 3]
-      );
-      tl.fromTo(
-        ctaBlockRef.current.querySelectorAll("[data-cta-item]"), //[cite: 3]
-        { autoAlpha: 0, y: 20 },
-        { autoAlpha: 1, y: 0, duration: 10, stagger: 3, ease: "power2.out" }, //[cite: 3]
-        74 //[cite: 3]
-      );
-    }, sectionRef); //[cite: 3]
+      tl.fromTo(ctaBlockRef.current, { autoAlpha: 0, y: 40, filter: "blur(10px)" }, { autoAlpha: 1, y: 0, filter: "blur(0px)", duration: 12, ease: "power3.out" }, 70);
+      tl.fromTo(ctaBlockRef.current.querySelectorAll("[data-cta-item]"), { autoAlpha: 0, y: 20 }, { autoAlpha: 1, y: 0, duration: 10, stagger: 3, ease: "power2.out" }, 74);
+    }, sectionRef);
 
     /* ─────────────────────────────────────────────
-       CLEANUP[cite: 3]
+       CLEANUP
     ───────────────────────────────────────────── */
     return () => {
-      ScrollTrigger.getAll().forEach(st => st.kill());
-
-      gsapCtx.revert(); //[cite: 3]
-
-      window.removeEventListener("resize", resizeCanvas); //[cite: 3]
+      gsapCtx.revert();
+      window.removeEventListener("resize", resizeCanvas);
+      btn.removeEventListener("pointermove", onBtnMove);
+      btn.removeEventListener("pointerleave", onBtnLeave);
       if (sectionRef.current) {
         sectionRef.current.style.position = 'relative';
         sectionRef.current.style.height = '100svh';
@@ -617,10 +544,6 @@ export default function ScrubbingWatchHero() {
       <Link 
         to="/" 
         state={{ scrollToWorks: true }} 
-        onClick={() => {
-          // Forza la morte immediata di ogni animazione GSAP locale
-          ScrollTrigger.getAll().forEach(t => t.kill());
-        }}
         className="aeon-back-link"
       >
         <span aria-hidden="true">←</span> BACK TO INDEX
