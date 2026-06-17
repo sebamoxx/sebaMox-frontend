@@ -233,13 +233,13 @@ export default function ScrubbingWatchHero() {
       width: "100%",
       overflow: "hidden",
       background: colors.dark,
-      willChange: "transform",          // hint #3: layer dedicato GPU
-      backfaceVisibility: "hidden",
-      WebkitBackfaceVisibility: "hidden",
     },
     canvas: {
-      position: "absolute", inset: 0, width: "100%", height: "100%",
-      display: "block", transform: "translateZ(0)",   // hint #3: canvas su layer GPU
+      position: "absolute", 
+      inset: 0, 
+      width: "100%", 
+      height: "100%",
+      display: "block", 
     },
     overlay: {
       position: "absolute", //[cite: 3]
