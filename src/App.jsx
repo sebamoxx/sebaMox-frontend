@@ -6,6 +6,7 @@ import { ScrollTrigger } from 'gsap/ScrollTrigger';
 import Preloader from './components/Preloader';
 import ScrollToTop from './components/ScrollToTop';
 import { TransitionLock } from './components/TransitionController';
+import { Analytics } from '@vercel/analytics/react';
 
 
 if ('scrollRestoration' in history) {
@@ -1240,56 +1241,60 @@ export default function App() {
   const handlePreloaderComplete = useCallback(() => setPreloaderDone(true), []);
 
   return (
-    <BrowserRouter>
-      {/* ── SEO GLOBALE DI DEFAULT ── */}
-      <Helmet>
-        <title>Seba Mollo | Sviluppatore Frontend & Backend</title>
-        <meta 
-          name="description" 
-          content="Portfolio di Seba Mollo: Sviluppatore Frontend React e Backend Python. Design premium, animazioni interattive e architetture web scalabili." 
-        />
-        <meta property="og:title" content="Seba Mollo | Portfolio Ufficiale" />
-        <meta property="og:description" content="Sviluppatore web specializzato in interfacce 3D, design premium e backend custom. Dai un'occhiata ai miei progetti." />
-        <meta property="og:image" content="/images/anteprimaSito.jpg" />
-      </Helmet>
-      <ScrollToTop />
-      <TransitionLock />
-      <CustomCursor />
-      {!preloaderDone && <Preloader onComplete={handlePreloaderComplete} />}
-      {preloaderDone && <ScrollProgress />}
-      <main style={MAIN_STYLE}>
-        <Routes>
-          <Route
-            path="/"
-            element={<HomePage key={location.pathname} />}
+    <>
+      <BrowserRouter>
+        {/* ── SEO GLOBALE DI DEFAULT ── */}
+        <Helmet>
+          <title>Seba Mollo | Sviluppatore Frontend & Backend</title>
+          <meta 
+            name="description" 
+            content="Portfolio di Seba Mollo: Sviluppatore Frontend React e Backend Python. Design premium, animazioni interattive e architetture web scalabili." 
           />
-          <Route
-            path="/projects/zx-spectrum"
-            element={<Suspense fallback={<SectionFallback />}><ZxSpectrumPage /></Suspense>}
-          />
-          <Route
-            path="/projects/software-3d-engine"
-            element={<Suspense fallback={<SectionFallback />}><Software3DEngine /></Suspense>}
-          />
-          <Route
-            path="/contact"
-            element={<Suspense fallback={<SectionFallback />}><ContactPage /></Suspense>}
-          />
-          <Route
-            path="/projects/aeon-camera"
-            element={<Suspense fallback={<SectionFallback />}><ScrubbingCameraHero /></Suspense>}
-          />
-          <Route
-            path="/works"
-            element={<Suspense fallback={<SectionFallback />}><WorksArchive /></Suspense>}
-          />
-        </Routes>
+          <meta property="og:title" content="Seba Mollo | Portfolio Ufficiale" />
+          <meta property="og:description" content="Sviluppatore web specializzato in interfacce 3D, design premium e backend custom. Dai un'occhiata ai miei progetti." />
+          <meta property="og:image" content="/images/anteprimaSito.jpg" />
+        </Helmet>
+        <ScrollToTop />
+        <TransitionLock />
+        <CustomCursor />
+        {!preloaderDone && <Preloader onComplete={handlePreloaderComplete} />}
+        {preloaderDone && <ScrollProgress />}
+        <main style={MAIN_STYLE}>
+          <Routes>
+            <Route
+              path="/"
+              element={<HomePage key={location.pathname} />}
+            />
+            <Route
+              path="/projects/zx-spectrum"
+              element={<Suspense fallback={<SectionFallback />}><ZxSpectrumPage /></Suspense>}
+            />
+            <Route
+              path="/projects/software-3d-engine"
+              element={<Suspense fallback={<SectionFallback />}><Software3DEngine /></Suspense>}
+            />
+            <Route
+              path="/contact"
+              element={<Suspense fallback={<SectionFallback />}><ContactPage /></Suspense>}
+            />
+            <Route
+              path="/projects/aeon-camera"
+              element={<Suspense fallback={<SectionFallback />}><ScrubbingCameraHero /></Suspense>}
+            />
+            <Route
+              path="/works"
+              element={<Suspense fallback={<SectionFallback />}><WorksArchive /></Suspense>}
+            />
+          </Routes>
 
-      </main>
-      <style>{`
-        @keyframes cursorBlink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
-        @media (max-width: 767px) { .hide-mobile { display: none !important; } }
-      `}</style>
-    </BrowserRouter>
+        </main>
+        <style>{`
+          @keyframes cursorBlink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+          @media (max-width: 767px) { .hide-mobile { display: none !important; } }
+        `}</style>
+      </BrowserRouter>
+
+      <Analytics />
+    </>
   );
 }

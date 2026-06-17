@@ -18,6 +18,7 @@
     "@react-three/postprocessing": "^3.0.4",
     "@splinetool/react-spline": "^4.1.0",
     "@splinetool/runtime": "^1.12.97",
+    "@vercel/analytics": "^2.0.1",
     "animejs": "^4.4.1",
     "framer-motion": "^12.40.0",
     "gsap": "^3.15.0",
