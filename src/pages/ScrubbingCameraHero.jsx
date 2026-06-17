@@ -165,15 +165,13 @@ export default function ScrubbingWatchHero() {
         defaults: { ease: "none" },
         scrollTrigger: {
           trigger: sectionRef.current,
-          scroller: mainScroller,
-          pinType: isTouch ? "transform" : "fixed", // 👈 Sincronizzato con App.jsx
+          scroller: mainScroller,     // = default globale (#root su touch): non lo combatte
           start: "top top",
-          end: SCRUB_LENGTH,
-          pin: true,
-          scrub: 1.4, 
-          anticipatePin: 1,
-          fastScrollEnd: true, // 👈 Previene loop se swipi fortissimo su mobile
+          end: "bottom bottom",       // scrub su tutta la corsa dello stage sticky (= +650%)
+          scrub: 1.4,
           invalidateOnRefresh: true,
+          // ⛔️ NIENTE pin / pinType / anticipatePin:
+          //   il "pin" lo fa il CSS position:sticky (compositor), non GSAP.
         },
       });
 
@@ -208,10 +206,6 @@ export default function ScrubbingWatchHero() {
       window.removeEventListener("resize", resizeCanvas);
       btn.removeEventListener("pointermove", onBtnMove);
       btn.removeEventListener("pointerleave", onBtnLeave);
-      if (sectionRef.current) {
-        sectionRef.current.style.position = 'relative';
-        sectionRef.current.style.height = '100svh';
-      }
     };
   }, []);
 
@@ -540,111 +534,108 @@ export default function ScrubbingWatchHero() {
         }
       `}</style>
 
-      {/* ── NAVIGAZIONE ───────────────────────── */}
-      <Link 
-        to="/" 
-        state={{ scrollToWorks: true }} 
-        className="aeon-back-link"
-      >
-        <span aria-hidden="true">←</span> BACK TO INDEX
-      </Link>
+      <div className="aeon-hero-stage" style={s.stage}>
+        <Link to="/" state={{ scrollToWorks: true }} className="aeon-back-link">
+          <span aria-hidden="true">←</span> BACK TO INDEX
+        </Link>
 
-      {/* ── CANVAS ────────────────────────────── */}
-      <canvas ref={canvasRef} style={s.canvas} aria-hidden="true" />
+        {/* ── CANVAS ────────────────────────────── */}
+        <canvas ref={canvasRef} style={s.canvas} aria-hidden="true" />
 
-      {/* ── LOADER ──────────────────────────────── */}
-      <div ref={loaderRef} style={s.loader}>
-        <span ref={loaderPctRef} style={s.loaderText}>
-          ASSEMBLING CALIBRE — 0%
-        </span>
-      </div>
-
-      {/* ── OVERLAYS ────────────────────────────── */}
-      <div style={s.overlay}>
-        {/* ACT I · 0–20% */}
-        <div ref={titleBlockRef} style={s.titleBlock}>
-          <div style={s.eyebrow}>GENÈVE, SUISSE</div>
-          <h1 style={s.h1}>
-            AURORA
-            <br />
-            SKELETONIZED
-          </h1>
-          <p style={s.subtitle}>The pinnacle of haute horlogerie.</p>
+        {/* ── LOADER ──────────────────────────────── */}
+        <div ref={loaderRef} style={s.loader}>
+          <span ref={loaderPctRef} style={s.loaderText}>
+            ASSEMBLING CALIBRE — 0%
+          </span>
         </div>
 
-        {/* ACT II · 30–60% */}
+        {/* ── OVERLAYS ────────────────────────────── */}
+        <div style={s.overlay}>
+          {/* ACT I · 0–20% */}
+          <div ref={titleBlockRef} style={s.titleBlock}>
+            <div style={s.eyebrow}>GENÈVE, SUISSE</div>
+            <h1 style={s.h1}>
+              AURORA
+              <br />
+              SKELETONIZED
+            </h1>
+            <p style={s.subtitle}>The pinnacle of haute horlogerie.</p>
+          </div>
+
+          {/* ACT II · 30–60% */}
+          <div
+            ref={opticsBlockRef}
+            className="aeon-optics-block" //[cite: 3]
+            style={s.opticsBlock} //[cite: 3]
+          >
+            <div style={s.eyebrow}>
+              CALIBRE 7X // TITANIUM
+            </div>
+            <h2 style={s.h2}>
+              MECHANICAL
+              <br />
+              PERFECTION
+            </h2>
+            <div className="aeon-spec-list" style={s.specList}>
+              <div data-spec style={s.specLine}>
+                SAPPHIRE CRYSTAL <span style={s.specAccent}>|</span> GRADE 5 TITANIUM
+              </div>
+              <div data-spec style={s.specLine}>
+                TOURBILLON ESCAPEMENT <span style={s.specAccent}>|</span> 28,800 VPH
+              </div>
+              <div data-spec style={s.specLine}>
+                72-HOUR POWER RESERVE <span style={s.specAccent}>|</span> 45 JEWELS
+              </div>
+            </div>
+          </div>
+
+          {/* ACT III · 70–100% */}
+          <div ref={ctaBlockRef} style={s.ctaBlock}>
+            <div data-cta-item style={{ ...s.eyebrow, marginBottom: "1.5rem" }}>
+              LIMITED PRODUCTION // 100 PIECES
+            </div>
+            <h3 data-cta-item style={s.h3}>
+              ACQUIRE TIMEPIECE
+            </h3>
+            <div data-cta-item style={s.ctaMeta}>
+              AVAILABLE FOR EXCLUSIVE CLIENTELE
+            </div>
+            <div data-cta-item>
+              <button
+                ref={ctaButtonRef} //[cite: 3]
+                className="aeon-cta-btn" //[cite: 3]
+                type="button" //[cite: 3]
+                onClick={() => {
+                  /* hook your checkout / waitlist route here */ //[cite: 3]
+                }}
+              >
+                REQUEST ALLOCATION
+                <span className="aeon-cta-arrow" aria-hidden="true">
+                  ↗
+                </span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* ── HUD ─────────────────────────────────── */}
+        <div style={s.hud} aria-hidden="true">
+          <span ref={hudFrameRef}>CALIBRE 7X — FR 001 / {FRAME_COUNT}</span>
+          <div style={s.hudBarTrack}>
+            <div ref={hudBarRef} style={s.hudBarFill} />
+          </div>
+        </div>
+
+        {/* ── SCROLL HINT ─────────────────────────── */}
         <div
-          ref={opticsBlockRef}
-          className="aeon-optics-block" //[cite: 3]
-          style={s.opticsBlock} //[cite: 3]
+          ref={scrollHintRef} //[cite: 3]
+          className="aeon-scroll-hint" //[cite: 3]
+          style={s.scrollHint} //[cite: 3]
+          aria-hidden="true" //[cite: 3]
         >
-          <div style={s.eyebrow}>
-            CALIBRE 7X // TITANIUM
-          </div>
-          <h2 style={s.h2}>
-            MECHANICAL
-            <br />
-            PERFECTION
-          </h2>
-          <div className="aeon-spec-list" style={s.specList}>
-            <div data-spec style={s.specLine}>
-              SAPPHIRE CRYSTAL <span style={s.specAccent}>|</span> GRADE 5 TITANIUM
-            </div>
-            <div data-spec style={s.specLine}>
-              TOURBILLON ESCAPEMENT <span style={s.specAccent}>|</span> 28,800 VPH
-            </div>
-            <div data-spec style={s.specLine}>
-              72-HOUR POWER RESERVE <span style={s.specAccent}>|</span> 45 JEWELS
-            </div>
-          </div>
+          <span className="aeon-hint-dot" />
+          SCROLL TO EXPLORE CALIBRE
         </div>
-
-        {/* ACT III · 70–100% */}
-        <div ref={ctaBlockRef} style={s.ctaBlock}>
-          <div data-cta-item style={{ ...s.eyebrow, marginBottom: "1.5rem" }}>
-            LIMITED PRODUCTION // 100 PIECES
-          </div>
-          <h3 data-cta-item style={s.h3}>
-            ACQUIRE TIMEPIECE
-          </h3>
-          <div data-cta-item style={s.ctaMeta}>
-            AVAILABLE FOR EXCLUSIVE CLIENTELE
-          </div>
-          <div data-cta-item>
-            <button
-              ref={ctaButtonRef} //[cite: 3]
-              className="aeon-cta-btn" //[cite: 3]
-              type="button" //[cite: 3]
-              onClick={() => {
-                /* hook your checkout / waitlist route here */ //[cite: 3]
-              }}
-            >
-              REQUEST ALLOCATION
-              <span className="aeon-cta-arrow" aria-hidden="true">
-                ↗
-              </span>
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* ── HUD ─────────────────────────────────── */}
-      <div style={s.hud} aria-hidden="true">
-        <span ref={hudFrameRef}>CALIBRE 7X — FR 001 / {FRAME_COUNT}</span>
-        <div style={s.hudBarTrack}>
-          <div ref={hudBarRef} style={s.hudBarFill} />
-        </div>
-      </div>
-
-      {/* ── SCROLL HINT ─────────────────────────── */}
-      <div
-        ref={scrollHintRef} //[cite: 3]
-        className="aeon-scroll-hint" //[cite: 3]
-        style={s.scrollHint} //[cite: 3]
-        aria-hidden="true" //[cite: 3]
-      >
-        <span className="aeon-hint-dot" />
-        SCROLL TO EXPLORE CALIBRE
       </div>
     </section>
   );
