@@ -317,7 +317,6 @@ export default function ContactSection({ audio }) {
           }}>
             Facciamo qualcosa<br />di straordinario.
           </h2>
-
           <MagneticCTA audio={audio} />
 
           <div style={{

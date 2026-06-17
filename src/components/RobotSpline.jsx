@@ -10,7 +10,7 @@ import React, {
 
 const Spline = lazy(() => import('@splinetool/react-spline'));
 
-// 🔴 MODIFICA: Ora punta al file locale del secondo robot nella cartella public
+// 🔴 Secondo robot, file locale in /public
 const ROBOT_SCENE_URL = 'elementi3D/robotCTA.splinecode';
 
 function RobotSplineBase({
@@ -18,117 +18,165 @@ function RobotSplineBase({
   sectionRef = null,
   deferMount = true,
   enableDesktopHover = false,
-  rootMargin = '1000px 0px 1000px 0px',
-  isHovered = false, // <--- PROP PER HOVER DEL BOTTONE
+  // ── PRELOAD: margine ampio → monta/scarica la scena PRIMA che entri,
+  //    così non c'è il "pop-in" quando arrivi alla sezione.
+  preloadMargin = '1000px 0px 1000px 0px',
+  // ── KILL-SWITCH: margine STRETTO → play()/stop() seguono la visibilità
+  //    REALE. È questo il valore che congela il motore WebGL fuori schermo.
+  playMargin = '0px 0px 0px 0px',
+  isHovered = false, // hover del bottone CTA
 }) {
   const wrapperRef = useRef(null);
-  const splineApp = useRef(null);
-  const playing = useRef(false);
-  const visible = useRef(false);
+  const splineAppRef = useRef(null);
+
+  // Stato del motore, tenuto in ref per non innescare re-render.
+  const isPlayingRef = useRef(false);   // riflette se app.play() è attivo
+  const isVisibleRef = useRef(false);   // sezione realmente nel viewport
+  const isTabActiveRef = useRef(
+    typeof document === 'undefined' ? true : !document.hidden
+  );
 
   const [mounted, setMounted] = useState(!deferMount);
   const [ready, setReady] = useState(false);
 
-  const reduced = useRef(
+  const reducedRef = useRef(
     typeof window !== 'undefined' &&
       !!window.matchMedia &&
       window.matchMedia('(prefers-reduced-motion: reduce)').matches
   );
 
-  // LA LOGICA DEL KILL SWITCH: Spegne il motore se non è visibile
+  /* ── CUORE DEL KILL-SWITCH ──────────────────────────────────────
+     Unica fonte di verità: decide se il motore DEVE girare e applica
+     play()/stop() solo se lo stato reale diverge. Idempotente, quindi
+     può essere chiamata da observer, tab-switch o reduced-motion senza
+     accendere/spegnere a vuoto.                                        */
   const reconcile = useCallback(() => {
-    const app = splineApp.current;
+    const app = splineAppRef.current;
     if (!app) return;
-    const shouldPlay = visible.current && !reduced.current;
 
-    if (shouldPlay && !playing.current) {
-      playing.current = true;
+    const shouldPlay =
+      isVisibleRef.current && isTabActiveRef.current && !reducedRef.current;
+
+    if (shouldPlay && !isPlayingRef.current) {
+      isPlayingRef.current = true;
       try { app.play(); } catch (_) {}
-    } else if (!shouldPlay && playing.current) {
-      playing.current = false;
-      try { app.stop(); } catch (_) {}
+    } else if (!shouldPlay && isPlayingRef.current) {
+      isPlayingRef.current = false;
+      try { app.stop(); } catch (_) {} // ferma render loop, controlli ed eventi
     }
   }, []);
 
+  /* ── onLoad: salviamo l'istanza e congeliamo SUBITO ──────────────
+     Spline parte in autoplay appena caricato: lo blocchiamo all'istante
+     e lasciamo che reconcile() decida in base alla visibilità corrente. */
   const handleLoad = useCallback(
     (app) => {
-      splineApp.current = app;
-      playing.current = false;
+      splineAppRef.current = app;
+      isPlayingRef.current = true; // dopo onLoad il runtime sta già renderizzando
       try { app.stop(); } catch (_) {}
+      isPlayingRef.current = false;
       setReady(true);
       reconcile();
     },
     [reconcile]
   );
 
-  /* ── L'EFFETTO PER L'HOVER DEL BOTTONE (DOPPIO EVENTO ESPLICITO) ── */
+  /* ── OBSERVER: due osservatori, due compiti distinti ─────────────
+     • mountObserver (margine ampio)  → monta la scena in anticipo, poi
+       si disconnette: serve una sola volta.
+     • playObserver  (margine stretto) → governa play/stop sulla
+       visibilità reale per tutta la vita del componente.               */
   useEffect(() => {
-    const app = splineApp.current;
-    if (!app || !visible.current) return;
+    const target = (sectionRef && sectionRef.current) || wrapperRef.current;
+    if (!target) return undefined;
 
-    if (isHovered) {
-      // Andata: Il cursore entra nel bottone -> scateniamo l'animazione
-      try { app.emitEvent('mouseDown', 'RobotContainer'); } catch(e) {}
-    } else {
-      // Ritorno: Il cursore esce dal bottone -> forziamo il ritorno alla base
-      try { app.emitEvent('mouseUp', 'RobotContainer'); } catch(e) {}
-    }
-  }, [isHovered]);
-
-
-  /* ── 2. IL KILL-SWITCH (INTERSECTION OBSERVER) ── */
-  useEffect(() => {
+    // Fallback SSR / browser senza IntersectionObserver: monta e gioca.
     if (typeof IntersectionObserver === 'undefined') {
-      visible.current = true;
+      isVisibleRef.current = true;
       setMounted(true);
       reconcile();
       return undefined;
     }
 
-    const target = (sectionRef && sectionRef.current) || wrapperRef.current;
-    if (!target) return undefined;
-
-    const observer = new IntersectionObserver(
+    const mountObserver = new IntersectionObserver(
       ([entry]) => {
-        visible.current = entry.isIntersecting;
-        if (entry.isIntersecting) setMounted(true);
-        reconcile(); // Attiva o disattiva il motore 3D in base alla visibilità
+        if (entry.isIntersecting) {
+          setMounted(true);
+          mountObserver.disconnect(); // preload una tantum
+        }
       },
-      { threshold: 0, rootMargin }
+      { threshold: 0, rootMargin: preloadMargin }
     );
-    observer.observe(target);
+    mountObserver.observe(target);
+
+    const playObserver = new IntersectionObserver(
+      ([entry]) => {
+        isVisibleRef.current = entry.isIntersecting;
+        reconcile(); // accende/spegne il motore 3D in base alla visibilità reale
+      },
+      { threshold: 0, rootMargin: playMargin }
+    );
+    playObserver.observe(target);
 
     return () => {
-      observer.disconnect();
-      const app = splineApp.current;
+      mountObserver.disconnect();
+      playObserver.disconnect();
+    };
+  }, [sectionRef, preloadMargin, playMargin, reconcile]);
+
+  /* ── TAB SWITCH: freeze quando la pagina è in background ─────────
+     Senza questo, cambiare tab lascia il loop WebGL acceso a sprecare
+     GPU/CPU anche se la sezione è "visibile" nel DOM.                  */
+  useEffect(() => {
+    if (typeof document === 'undefined') return undefined;
+    const onVisibility = () => {
+      isTabActiveRef.current = !document.hidden;
+      reconcile();
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => document.removeEventListener('visibilitychange', onVisibility);
+  }, [reconcile]);
+
+  /* ── CLEANUP UNMOUNT: dispose una sola volta, alla distruzione ────
+     Separato dagli observer così non distruggiamo mai l'app mentre il
+     componente è ancora montato (es. se cambiano le prop dell'observer). */
+  useEffect(() => {
+    return () => {
+      const app = splineAppRef.current;
       if (app) {
         try { app.stop(); } catch (_) {}
         try { app.dispose && app.dispose(); } catch (_) {}
       }
-      splineApp.current = null;
-      playing.current = false;
+      splineAppRef.current = null;
+      isPlayingRef.current = false;
     };
-  }, [sectionRef, rootMargin, reconcile]);
+  }, []);
 
-  /* ── 3. AUTOPLAY MOBILE (Il "Battito" del Cuore) ── */
+  /* ── HOVER del bottone CTA (solo se visibile) ────────────────────── */
   useEffect(() => {
-    if (!ready) return;
+    const app = splineAppRef.current;
+    if (!app || !isVisibleRef.current) return;
+    try {
+      app.emitEvent(isHovered ? 'mouseDown' : 'mouseUp', 'RobotContainer');
+    } catch (_) {}
+  }, [isHovered]);
+
+  /* ── AUTOPLAY MOBILE (il "battito" del cuore) ────────────────────── */
+  useEffect(() => {
+    if (!ready) return undefined;
 
     let timeoutId;
 
     const triggerMobileHeartbeat = () => {
-      const app = splineApp.current;
-      
+      const app = splineAppRef.current;
       const isMobile = window.innerWidth < 1024;
-      if (!app || !visible.current || !isMobile) return;
+      // Niente battito se off-screen / tab nascosta: rispetta il kill-switch.
+      if (!app || !isVisibleRef.current || !isTabActiveRef.current || !isMobile) return;
 
-      // 1. ANDATA: Accendiamo il cuore
-      try { app.emitEvent('mouseDown', 'RobotContainer'); } catch(e) {}
-
-      // 2. RITORNO: Lo spegniamo dopo 2 secondi
+      try { app.emitEvent('mouseDown', 'RobotContainer'); } catch (_) {}
       timeoutId = setTimeout(() => {
-        try { app.emitEvent('mouseUp', 'RobotContainer'); } catch(e) {}
-      }, 2000); 
+        try { app.emitEvent('mouseUp', 'RobotContainer'); } catch (_) {}
+      }, 2000);
     };
 
     const intervalId = setInterval(triggerMobileHeartbeat, 4500);
