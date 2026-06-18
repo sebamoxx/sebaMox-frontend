@@ -15,7 +15,7 @@ import { useEffect, useRef } from "react";
 import gsap from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
 import { Link } from "react-router-dom";
-import SEO from './components/SEO';
+import SEO from '../components/SEO';
 
 gsap.registerPlugin(ScrollTrigger);
 
@@ -425,11 +425,7 @@ export default function ScrubbingWatchHero() {
       aria-label="High End Watch Hero"
     >
       {/* ── SEO DINAMICA PER QUESTA PAGINA ── */}
-      <SEO
-        title="Haute Horlogerie | Scrubbing Sequence"
-        description="Esplora l'assemblaggio di un orologio di lusso (Calibre 7X) tramite una sequenza canvas ultra-fluida a 240 frame sincronizzata allo scroll."
-        image="/camera-frames/ezgif-frame-120.jpg" 
-      />
+      <SEO />
       
       <style>{`
         @keyframes watch-pulse {

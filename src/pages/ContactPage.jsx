@@ -8,7 +8,7 @@
 import { useState, useRef, useEffect, useCallback, useLayoutEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import gsap from "gsap";
-import SEO from './components/SEO';
+import SEO from '../components/SEO';
 
 // ─── Design Tokens ────────────────────────────────────────────────────────────
 const C = {
@@ -416,11 +416,7 @@ export default function ContactPage() {
 
   return (
     <div>
-      <SEO
-        title="Contatta Seba Mollo | Inizia il tuo progetto"
-        description="Hai un progetto in mente? Contattami per discutere di interfacce premium, animazioni 3D e architetture web scalabili con Python e React."
-        image="/images/contactImage.jpg"
-      />
+      <SEO />
 
       <div className="cp-grain" aria-hidden="true" />
       

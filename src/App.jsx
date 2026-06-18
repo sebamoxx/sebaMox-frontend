@@ -7,6 +7,7 @@ import Preloader from './components/Preloader';
 import ScrollToTop from './components/ScrollToTop';
 import { TransitionLock } from './components/TransitionController';
 import { Analytics } from '@vercel/analytics/react';
+import { SITE, toAbsolute } from './seo.config';
 
 
 if ('scrollRestoration' in history) {
@@ -1243,16 +1244,23 @@ export default function App() {
   return (
     <>
       <BrowserRouter>
-        {/* ── SEO GLOBALE DI DEFAULT ── */}
+        {/* ── SEO GLOBALE DI DEFAULT (fonte: src/seo.config.js) ──
+            Fa da fallback per la home '/' e durante il caricamento (Suspense);
+            ogni pagina lo sovrascrive col proprio <SEO />. */}
         <Helmet>
-          <title>Seba Mollo | Sviluppatore Frontend & Backend</title>
-          <meta 
-            name="description" 
-            content="Portfolio di Seba Mollo: Sviluppatore Frontend React e Backend Python. Design premium, animazioni interattive e architetture web scalabili." 
-          />
-          <meta property="og:title" content="Seba Mollo | Portfolio Ufficiale" />
-          <meta property="og:description" content="Sviluppatore web specializzato in interfacce 3D, design premium e backend custom. Dai un'occhiata ai miei progetti." />
-          <meta property="og:image" content="/images/anteprimaSito.jpg" />
+          <title>{SITE.defaultTitle}</title>
+          <meta name="description" content={SITE.defaultDescription} />
+          <meta property="og:type" content="website" />
+          <meta property="og:site_name" content={SITE.name} />
+          <meta property="og:locale" content={SITE.locale} />
+          <meta property="og:title" content={SITE.defaultTitle} />
+          <meta property="og:description" content={SITE.defaultDescription} />
+          <meta property="og:url" content={SITE.baseUrl} />
+          <meta property="og:image" content={toAbsolute(SITE.defaultImage)} />
+          <meta name="twitter:card" content="summary_large_image" />
+          <meta name="twitter:title" content={SITE.defaultTitle} />
+          <meta name="twitter:description" content={SITE.defaultDescription} />
+          <meta name="twitter:image" content={toAbsolute(SITE.defaultImage)} />
         </Helmet>
         <ScrollToTop />
         <TransitionLock />

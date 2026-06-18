@@ -2,7 +2,7 @@ import React, { useEffect, useRef } from 'react';
 import gsap from 'gsap';
 import { ScrollTrigger } from 'gsap/ScrollTrigger';
 import { Link } from 'react-router-dom';
-import SEO from './components/SEO';
+import SEO from '../components/SEO';
 
 
 gsap.registerPlugin(ScrollTrigger);
@@ -1017,11 +1017,7 @@ export default function Software3DEngine() {
   return (
     <div ref={pageRef} style={{ background: C.bgDeep, minHeight: '100svh', color: C.text }}>
       {/* ── SEO DINAMICA PER QUESTA PAGINA ── */}
-      <SEO
-        title="Software 3D Engine | Ingegneria Grafica"
-        description="Un motore di rendering 3D CPU-only scritto in C puro. Esplora l'architettura matematica, le proiezioni prospettiche e la rasterizzazione senza l'ausilio di GPU." 
-        image="/images/immagine3D.png" 
-      />
+      <SEO />
       <style>{CSS}</style>
 
       {/* ══ GRAIN OVERLAY (fisso, pointer-events:none) ══ */}

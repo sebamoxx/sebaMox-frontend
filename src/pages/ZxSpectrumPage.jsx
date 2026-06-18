@@ -2,7 +2,7 @@ import React, { useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import gsap from 'gsap';
 import { ScrollTrigger } from 'gsap/ScrollTrigger';
-import SEO from './components/SEO';
+import SEO from '../components/SEO';
 
 gsap.registerPlugin(ScrollTrigger);
 
@@ -363,11 +363,7 @@ export default function ZxSpectrumPage() {
   return (
     <>
       {/* ── SEO DINAMICA PER QUESTA PAGINA ── */}
-      <SEO
-        title="ZX Spectrum AI Engine | Seba Mollo"
-        description="Un algoritmo di ottimizzazione stocastica scritto in C nativo e compilato in WASM, progettato per forzare i limiti hardware degli anni '80." 
-        image="/images/fotoMonroe.avif"
-      />
+      <SEO />
       {/* ── Inject Global CSS ── */}
       <style>{globalCSS}</style>
 
