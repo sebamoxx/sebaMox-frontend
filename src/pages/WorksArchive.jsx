@@ -399,8 +399,6 @@ export default function WorksArchive() {
     && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
   useEffect(() => {
-    // 2. BLOCCHIAMO LE ANIMAZIONI DI SCROLL FINCHÉ NON È PRONTO
-    if (!archiveReady) return; 
 
     const section = sectionRef.current;
     const world   = worldRef.current;
@@ -533,7 +531,7 @@ export default function WorksArchive() {
     }, section);
 
     return () => gsapCtx.revert();
-  }, [reducedMotion, archiveReady]);
+  }, [reducedMotion]);
 
   return (
     <section
