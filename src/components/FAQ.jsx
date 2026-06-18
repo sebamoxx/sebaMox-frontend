@@ -17,18 +17,14 @@ const C = {
   dim:      'rgba(240,230,211,0.12)',
   hair:     'rgba(240,230,211,0.065)',
   borderHi: 'rgba(244,162,97,0.35)',
+  panel:    '#0A0604',
 };
 const FONT = "'Outfit', 'Cabinet Grotesk', 'Geist', system-ui, sans-serif";
 const MONO = "'JetBrains Mono', 'ui-monospace', 'SFMono-Regular', Menlo, Monaco, monospace";
 
 
 /* ═══════════════════════════════════════════════════════════
-   SCRAMBLE SPAN
-   Fix vs originale:
-   • duration 0.65→1.2s + charset più ricco (effetto più vistoso)
-   • stateRef locale (non globale) → kill pulito per istanza
-   • autoPlay: IntersectionObserver per trigger su mobile (no hover)
-   • Rispetta prefers-reduced-motion
+   SCRAMBLE SPAN — invariato
 ═══════════════════════════════════════════════════════════ */
 const CHARSET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789◈⬡◎§#@%&+=<>↗◆▪□◇▽△▸';
 
@@ -42,7 +38,6 @@ const ScrambleSpan = memo(({ children, style, autoPlay = false }) => {
     const noAnim = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     if (noAnim) return;
 
-    // Stato locale → killTweensOf non confonde istanze diverse
     const state = { p: 0 };
 
     const run = () => {
@@ -62,7 +57,6 @@ const ScrambleSpan = memo(({ children, style, autoPlay = false }) => {
 
     el.addEventListener('mouseenter', run);
 
-    // Auto-trigger su scroll — copre mobile dove non esiste hover
     let obs;
     if (autoPlay) {
       obs = new IntersectionObserver(([entry]) => {
@@ -96,8 +90,7 @@ const Crosshair = ({ style }) => (
 
 
 /* ═══════════════════════════════════════════════════════════
-   PLUS ICON — SVG geometrico, più elegante del carattere "+"
-   La rotazione a 45° via GSAP dà l'icona × di chiusura
+   PLUS ICON — SVG geometrico (trigger: indica "apri")
 ═══════════════════════════════════════════════════════════ */
 function PlusIcon() {
   return (
@@ -109,9 +102,22 @@ function PlusIcon() {
   );
 }
 
+/* ═══════════════════════════════════════════════════════════
+   CLOSE ICON — × geometrica per l'overlay HUD
+═══════════════════════════════════════════════════════════ */
+function CloseIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none"
+      xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <line x1="3" y1="3"  x2="13" y2="13" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      <line x1="13" y1="3" x2="3"  y2="13" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 
 /* ═══════════════════════════════════════════════════════════
-   FAQ DATA
+   FAQ DATA — preservato 1:1
 ═══════════════════════════════════════════════════════════ */
 const FAQS = [
   {
@@ -143,62 +149,36 @@ const FAQS = [
 
 
 /* ═══════════════════════════════════════════════════════════
-   FAQ ITEM — accordion singolo
+   FAQ TRIGGER — card statica nella lista
 
-   Fix critici rispetto all'originale:
-   1. CSS Grid (0fr → 1fr) sostituisce gsap height:'auto'
-      → immune a resize/orientation-change, niente bug su mobile
-   2. GSAP solo per icona (rotation) — nessun height tween
-   3. willChange ASSENTE dal CSS statico; gestito via classe .is-open
-   4. isMounted ref: salta animazione al primo render (evita flash)
-   5. handleClick stabile via useCallback (index+onToggle costanti)
-   6. aria-expanded + aria-controls + aria-hidden su content
-   7. minHeight: 48px su button → touch target accessibile
+   ZERO LAYOUT SHIFT:
+   • Nessuna espansione inline. Altezza FISSA e immutabile.
+   • Al click chiama onOpen(faq, index) → apre l'overlay HUD.
+   • Niente CSS Grid 0fr→1fr, niente ResizeObserver, niente
+     misurazioni di altezza, niente ScrollTrigger.refresh.
 ═══════════════════════════════════════════════════════════ */
-function FaqItem({ faq, index, isOpen, onToggle }) {
-  const iconRef    = useRef(null);
-  const isMounted  = useRef(false);
-
-  /* Stable click handler — onToggle (useCallback dal parent) + index costante.
-     focus({preventScroll:true}) — RULE 4: impedisce lo "scroll-into-view" nativo
-     che il browser farebbe sul <button> appena premuto (un nudge di scroll al
-     tap su mobile). Nient'altro: l'espansione e' delegata AL 100% al CSS/GPU. */
-  const handleClick = useCallback((e) => {
-    try { e.currentTarget.focus({ preventScroll: true }); } catch { /* Safari datati */ }
-    onToggle(index);
-  }, [onToggle, index]);
-
-  // Icona: unico uso di GSAP in FaqItem — semplice rotation
-  useEffect(() => {
-    if (!isMounted.current) { isMounted.current = true; return; }
-    if (!iconRef.current) return;
-    const noAnim = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    if (noAnim) return;
-    gsap.to(iconRef.current, {
-      rotation: isOpen ? 45 : 0,
-      duration: 0.42,
-      ease: 'back.out(1.8)',
-    });
-  }, [isOpen]);
-
-  // Estrae '01' da 'INDEX//01'
+function FaqTrigger({ faq, index, isActive, onOpen }) {
   const numDisplay = faq.num.replace('INDEX//', '');
+
+  const handleClick = useCallback((e) => {
+    // RULE: niente scroll-into-view nativo sul tap del button
+    try { e.currentTarget.blur(); } catch { /* Safari datati */ }
+    onOpen(faq, index);
+  }, [faq, index, onOpen]);
 
   return (
     <div
-      className={`faq-accordion-item${isOpen ? ' is-open' : ''}`}
+      className={`faq-trigger-item${isActive ? ' is-active' : ''}`}
       style={{
         borderBottom: `1px solid ${C.hair}`,
         position: 'relative',
         transition: 'border-color 0.35s ease, background-color 0.2s ease',
       }}
     >
-      {/* ── TRIGGER BUTTON ────────────────────────────────── */}
       <button
         onClick={handleClick}
         className="faq-trigger-btn"
-        aria-expanded={isOpen}
-        aria-controls={`faq-panel-${index}`}
+        aria-haspopup="dialog"
         style={{
           width: '100%',
           display: 'flex',
@@ -206,13 +186,6 @@ function FaqItem({ faq, index, isOpen, onToggle }) {
           alignItems: 'center',
           background: 'none',
           border: 'none',
-          /*
-            TOUCH TARGET FIX:
-            minHeight 48px garantisce l'area minima raccomandata
-            da WCAG 2.5.5 per dita medie su touchscreen.
-            Il padding verticale usa clamp così su desktop
-            rimane spaziato e su mobile non è enorme.
-          */
           padding: 'clamp(1.1rem, 2.8vw, 2.2rem) 0',
           minHeight: '48px',
           cursor: 'pointer',
@@ -220,21 +193,13 @@ function FaqItem({ faq, index, isOpen, onToggle }) {
           gap: '1.5rem',
         }}
       >
-        {/*
-          TRIGGER LEFT — su mobile diventa flex column via CSS:
-          [01] sopra, domanda sotto (prompt requirement)
-        */}
         <div className="faq-trigger-left" style={{
           display: 'flex',
           alignItems: 'baseline',
           gap: 'clamp(1rem, 3vw, 3.5rem)',
           flex: 1,
-          minWidth: 0,   // previene overflow in flex container
+          minWidth: 0,
         }}>
-          {/*
-            INDEX NUMBER — formato [01] più tecnico del generico INDEX//01
-            Su mobile: rimane ma posizionato sopra grazie al flex column CSS
-          */}
           <span
             className="faq-index-num"
             aria-hidden="true"
@@ -258,7 +223,7 @@ function FaqItem({ faq, index, isOpen, onToggle }) {
               fontFamily: FONT,
               fontWeight: 600,
               fontSize: 'clamp(1.05rem, 1.8vw, 1.55rem)',
-              color: isOpen ? C.acc : C.txt,
+              color: C.txt,
               margin: 0,
               letterSpacing: '-0.025em',
               lineHeight: 1.3,
@@ -270,59 +235,108 @@ function FaqItem({ faq, index, isOpen, onToggle }) {
           </h3>
         </div>
 
-        {/* ICON — SVG cross, rotazione 45° via GSAP = × di chiusura */}
         <div
-          ref={iconRef}
           className="faq-icon-plus"
           aria-hidden="true"
           style={{
-            color: isOpen ? C.acc : C.mut,
+            color: C.mut,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
             width: '2.5rem',
             height: '2.5rem',
             flexShrink: 0,
-            transition: 'color 0.3s ease',
+            transition: 'color 0.3s ease, transform 0.45s cubic-bezier(0.16,1,0.3,1)',
           }}
         >
           <PlusIcon />
         </div>
       </button>
+    </div>
+  );
+}
 
-      {/* ── CONTENUTO ACCORDION — CSS GRID ────────────────────
-          FIX PRINCIPALE: sostituisce gsap height:'auto'
 
-          Tecnica: grid-template-rows 0fr → 1fr
-          → nessun bug resize/orientation change
-          → nessun scrollHeight misread su mobile
-          → nessun memory leak da tween GSAP non cancellati
-          → transizione controllata interamente da CSS (60fps GPU)
-          Supporto: Chrome 107+, Firefox 107+, Safari 16+ ✓
-      ────────────────────────────────────────────────────── */}
-      <div
-        id={`faq-panel-${index}`}
-        className="faq-grid-wrapper"
-        aria-hidden={!isOpen}
-        style={{ gridTemplateRows: isOpen ? '1fr' : '0fr' }}
-      >
-        {/* min-height:0 è obbligatorio per far collassare la riga a 0fr */}
-        <div className="faq-grid-inner">
-          <div className="faq-content-inner">
-            <p
-              className="faq-answer-text"
-              style={{
-                fontFamily: FONT,
-                fontSize: 'clamp(0.9rem, 1.15vw, 1.05rem)',
-                color: C.mut,
-                lineHeight: 1.75,
-                margin: 0,
-                maxWidth: '70ch',
-              }}
-            >
-              {faq.a}
-            </p>
+/* ═══════════════════════════════════════════════════════════
+   OVERLAY HUD — Bottom Sheet (mobile) / Modal (desktop)
+
+   • position:fixed; inset:0; z-index:9999
+   • background scuro + backdrop-filter:blur (glassmorphism)
+   • Mobile  (<768px): bottom sheet ancorato in basso, slide-up
+   • Desktop (>=768px): modale centrato, max-width 600px
+   • data-state="open"/"closed" → transizioni CSS fluide
+   • Chiusura: bottone X, click sull'overlay, tasto Escape
+═══════════════════════════════════════════════════════════ */
+function FaqOverlay({ entry, isOpen, onClose }) {
+  const closeBtnRef = useRef(null);
+
+  // Focus iniziale sul bottone di chiusura (accessibilità HUD)
+  useEffect(() => {
+    if (isOpen && closeBtnRef.current) {
+      closeBtnRef.current.focus({ preventScroll: true });
+    }
+  }, [isOpen]);
+
+  if (!entry) return null;
+  const { faq, index } = entry;
+  const numDisplay = faq.num.replace('INDEX//', '');
+  const state = isOpen ? 'open' : 'closed';
+
+  // Chiude solo se il click è sull'overlay (sfondo), non sul pannello
+  const handleOverlayMouseDown = (e) => {
+    if (e.target === e.currentTarget) onClose();
+  };
+
+  return (
+    <div
+      className="faq-overlay"
+      data-state={state}
+      onMouseDown={handleOverlayMouseDown}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="faq-hud-title"
+    >
+      <div className="faq-panel" data-state={state} role="document">
+
+        {/* ── DRAG HANDLE — solo mobile (visivo, stile bottom sheet) ── */}
+        <div className="faq-panel-handle" aria-hidden="true" />
+
+        {/* ── HEADER HUD — "Terminale Dati" ── */}
+        <div className="faq-panel-head">
+          <div className="faq-panel-meta">
+            <span className="faq-panel-index">[{numDisplay}]</span>
+            <span className="faq-panel-tag">// QUERY RISOLTA</span>
           </div>
+
+          <button
+            ref={closeBtnRef}
+            type="button"
+            className="faq-panel-close"
+            onClick={onClose}
+            aria-label="Chiudi"
+          >
+            <span className="faq-panel-close-label">CLOSE</span>
+            <span className="faq-panel-close-icon"><CloseIcon /></span>
+          </button>
+        </div>
+
+        {/* ── BODY — scrolla autonomamente se troppo lungo ── */}
+        <div className="faq-panel-body">
+          <h3 id="faq-hud-title" className="faq-panel-question">
+            {faq.q}
+          </h3>
+
+          <div className="faq-panel-divider" aria-hidden="true" />
+
+          <p className="faq-panel-answer">
+            {faq.a}
+          </p>
+        </div>
+
+        {/* ── FOOTER HUD — riga tecnica decorativa ── */}
+        <div className="faq-panel-foot" aria-hidden="true">
+          <span>ESC / TAP OUT — TO CLOSE</span>
+          <span>{String(index + 1).padStart(2, '0')} / {String(FAQS.length).padStart(2, '0')}</span>
         </div>
       </div>
     </div>
@@ -331,55 +345,84 @@ function FaqItem({ faq, index, isOpen, onToggle }) {
 
 
 /* ═══════════════════════════════════════════════════════════
-   SEZIONE FAQ PRINCIPALE
+   SEZIONE FAQ PRINCIPALE — pattern Overlay HUD
 
-   Fix rispetto all'originale:
-   1. handleToggle in useCallback → FaqItem non ri-renderizza
-      per colpa di nuove reference funzione ad ogni setState
-   2. matchMedia era istanziato ma mai usato → rimosso
-   3. prefers-reduced-motion check all'avvio GSAP context
-   4. pointer-events !important rimossi da sezione/container
-      (rimangono solo su [aria-hidden])
-   5. immediateRender:false aggiunto agli fromTo per evitare
-      flash visivo su Chrome mobile
+   GESTIONE STATO:
+   • entry  → { faq, index } attivo (resta montato durante l'uscita)
+   • isOpen → pilota data-state per le transizioni CSS
+   Flusso apertura: setEntry → (doppio rAF) setIsOpen(true)
+   Flusso chiusura: setIsOpen(false) → (timeout = durata tween) setEntry(null)
+
+   SCROLL FREEZE (senza toccare Lenis / App.jsx):
+   • overflow:hidden sul <body> finché l'overlay è montato
+   • compensazione scrollbar → ZERO layout shift dietro l'overlay
 ═══════════════════════════════════════════════════════════ */
 export default function FAQ() {
-  const [activeIndex, setActiveIndex] = useState(null);
+  const [entry, setEntry]   = useState(null);   // { faq, index } | null
+  const [isOpen, setIsOpen] = useState(false);
+  const closeTimer = useRef(null);
+
   const sectionRef  = useRef(null);
   const headRef     = useRef(null);
   const listRef     = useRef(null);
   const line1Ref    = useRef(null);
   const line2Ref    = useRef(null);
 
-  // useCallback: handleToggle stabile → nessun re-render inutile
-  const handleToggle = useCallback((index) => {
-    setActiveIndex(prev => prev === index ? null : index);
+  /* ── APRI ─────────────────────────────────────────────── */
+  const openFaq = useCallback((faq, index) => {
+    clearTimeout(closeTimer.current);
+    setEntry({ faq, index });
+    // doppio rAF: monta in stato "closed" → frame dopo passa a "open"
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => setIsOpen(true));
+    });
   }, []);
 
-  /* ── RULE 3 — REFRESH POSTICIPATO (l'UNICO intervento JS sullo scroll) ──────
-     L'espansione 0fr→1fr e' delegata AL 100% alla GPU via CSS: durante quei
-     ~520ms il thread JS DORME — niente ResizeObserver, niente letture di layout
-     per-frame → niente thrashing → niente tremolio.
-     Quando il pannello cambia altezza, i trigger di GSAP che stanno SOTTO la FAQ
-     si sfasano: li risincronizziamo UNA SOLA volta, a transizione abbondantemente
-     conclusa (600ms > 520ms), con un banale setTimeout agganciato al cambio di
-     stato. ZERO refresh durante l'animazione. */
-  const didMount = useRef(false);
-  useEffect(() => {
-    if (!didMount.current) { didMount.current = true; return; } // salta il primo render
-    const id = setTimeout(() => {
-      ScrollTrigger.refresh(); // ricalcolo a layout STABILE, fuori dall'animazione
-    }, 600);
-    return () => clearTimeout(id);
-  }, [activeIndex]);
+  /* ── CHIUDI ───────────────────────────────────────────── */
+  const closeFaq = useCallback(() => {
+    setIsOpen(false);
+    clearTimeout(closeTimer.current);
+    // smonta a transizione conclusa (520ms > durata animazione pannello)
+    closeTimer.current = setTimeout(() => setEntry(null), 520);
+  }, []);
 
+  // Pulizia timer all'unmount
+  useEffect(() => () => clearTimeout(closeTimer.current), []);
+
+  /* ── SCROLL FREEZE NATIVO ──────────────────────────────────
+     Niente Lenis qui: congelo il <body>. La compensazione della
+     scrollbar evita che la pagina dietro "salti" di lato. */
   useEffect(() => {
-    // Skip animazioni se utente preferisce movimento ridotto
+    if (!entry) return;
+    const body = document.body;
+    const sbw  = window.innerWidth - document.documentElement.clientWidth;
+    const prevOverflow = body.style.overflow;
+    const prevPadRight = body.style.paddingRight;
+
+    body.style.overflow = 'hidden';
+    if (sbw > 0) body.style.paddingRight = `${sbw}px`;
+
+    return () => {
+      body.style.overflow = prevOverflow;
+      body.style.paddingRight = prevPadRight;
+    };
+  }, [entry]);
+
+  /* ── ESCAPE → chiudi ──────────────────────────────────── */
+  useEffect(() => {
+    if (!entry) return;
+    const onKey = (e) => { if (e.key === 'Escape') closeFaq(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [entry, closeFaq]);
+
+  /* ── REVEAL ANIMATIONS (titolo + lista trigger) ──────────
+     Layout ora STATICO: nessun ScrollTrigger.refresh al toggle. */
+  useEffect(() => {
     const noAnim = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     if (noAnim) return;
 
     const ctx = gsap.context(() => {
-      // Reveal titolo — mask slide-up per riga
       gsap.fromTo(
         [line1Ref.current, line2Ref.current],
         { yPercent: 105, opacity: 0, immediateRender: false },
@@ -390,7 +433,6 @@ export default function FAQ() {
         }
       );
 
-      // Reveal lista accordions
       if (listRef.current?.children?.length) {
         gsap.fromTo(
           [...listRef.current.children],
@@ -423,7 +465,7 @@ export default function FAQ() {
       }}
     >
 
-      {/* SCANLINE CRT — texture brutalista di sfondo, opacity minimal */}
+      {/* SCANLINE CRT */}
       <div aria-hidden="true" style={{
         position: 'absolute', inset: 0, zIndex: 0, pointerEvents: 'none',
         backgroundImage: `repeating-linear-gradient(
@@ -477,12 +519,10 @@ export default function FAQ() {
             margin: '0 0 1.8rem',
           }}>
             <span style={{ width: '2.5rem', height: 1, background: C.acc, opacity: 0.6, display: 'inline-block', flexShrink: 0 }} />
-            {/* autoPlay: trigger su scroll (mobile + desktop) */}
             <ScrambleSpan autoPlay>05. DETTAGLI OPERATIVI</ScrambleSpan>
           </p>
 
           <h2 style={{ margin: 0, padding: 0, textTransform: 'uppercase', userSelect: 'none' }}>
-            {/* overflow:hidden crea la "mask" per lo slide-up del reveal */}
             <div style={{ overflow: 'hidden', minHeight: '1.05em' }}>
               <div ref={line1Ref}>
                 <span style={{
@@ -513,7 +553,7 @@ export default function FAQ() {
           </h2>
         </div>
 
-        {/* ── ACCORDION LIST ──────────────────────────────── */}
+        {/* ── LISTA TRIGGER (altezza statica) ─────────────── */}
         <div
           ref={listRef}
           style={{
@@ -525,49 +565,23 @@ export default function FAQ() {
           }}
         >
           {FAQS.map((faq, index) => (
-            <FaqItem
+            <FaqTrigger
               key={faq.num}
               faq={faq}
               index={index}
-              isOpen={activeIndex === index}
-              onToggle={handleToggle}
+              isActive={entry?.index === index}
+              onOpen={openFaq}
             />
           ))}
         </div>
 
       </div>
 
+      {/* ══ OVERLAY HUD ══════════════════════════════════════ */}
+      <FaqOverlay entry={entry} isOpen={isOpen} onClose={closeFaq} />
+
       {/* ══ CSS GLOBALE ══════════════════════════════════════ */}
       <style>{`
-        /* ════════════════════════════════════════════════════
-           RULE 1 — KILL SCROLL ANCHORING (statico e permanente)
-           Durante un cambio d'altezza il browser riscrive scrollTop per
-           "tenere ferma" un'ancora; con un'animazione multi-frame come
-           0fr→1fr questo diventa il TREMOLIO su mobile. Disattivando
-           l'anchoring sull'INTERO sottoalbero della FAQ, nessun nodo qui
-           dentro viene scelto come ancora → niente compensazione → niente
-           jitter. Regola STATICA, mai iniettata a runtime. */
-        .awwwards-faq-section,
-        .faq-accordion-item,
-        .faq-grid-wrapper { overflow-anchor: none !important; }
-
-        /* ── Grid accordion — cuore del fix ──────────────────
-           display:grid + transition su grid-template-rows
-           è la tecnica più solida per accordion CSS puro.
-           Nessun JS per height, nessun scrollHeight misread. */
-        .faq-grid-wrapper {
-          display: grid;
-          transition: grid-template-rows 0.52s cubic-bezier(0.16, 1, 0.3, 1);
-        }
-        /* min-height:0 obbligatorio per collasso a 0fr */
-        .faq-grid-inner {
-          min-height: 0;
-          overflow: hidden;
-        }
-        .faq-content-inner {
-          padding: 0.25rem 0 2.2rem clamp(1rem, 4.5vw, 5rem);
-        }
-
         /* ── Focus visibile — navigazione tastiera ── */
         .faq-trigger-btn:focus-visible {
           outline: 2px solid ${C.acc};
@@ -577,106 +591,284 @@ export default function FAQ() {
         .faq-trigger-btn {
           outline: none;
           -webkit-tap-highlight-color: transparent;
-          /* RULE 4 — niente double-tap-zoom / tap-delay → tap immediato e
-             nessun comportamento touch nativo che possa innescare uno scroll. */
           touch-action: manipulation;
         }
 
-        /* ── Desktop hover — effetti brutalisti ──────────────
-           border neon, slide domanda, index highlight         */
+        /* ── Desktop hover — effetti brutalisti ── */
         @media (hover: hover) and (pointer: fine) {
-          .faq-accordion-item:hover {
+          .faq-trigger-item:hover {
             border-color: ${C.borderHi} !important;
             background-color: rgba(244,162,97,0.025);
           }
-          .faq-accordion-item:hover .faq-question-text {
+          .faq-trigger-item:hover .faq-question-text {
             color: ${C.acc} !important;
             transform: translateX(5px);
           }
-          .faq-accordion-item:hover .faq-index-num {
+          .faq-trigger-item:hover .faq-index-num {
             color: rgba(244,162,97,0.55) !important;
           }
-          .faq-accordion-item:hover .faq-icon-plus {
+          .faq-trigger-item:hover .faq-icon-plus {
             color: ${C.acc} !important;
+            transform: rotate(90deg);
           }
         }
 
-        /* ── Mobile active — feedback tattile immediato ──────
-           Su touch, l'utente ottiene risposta visiva PRIMA
-           che l'animazione di apertura parta              */
+        /* ── Mobile active — feedback tattile immediato ── */
         @media (hover: none) {
-          .faq-accordion-item:active {
+          .faq-trigger-item:active {
             background-color: rgba(244,162,97,0.04);
             border-color: ${C.borderHi} !important;
           }
         }
 
-        /* ── Stato aperto — bordo accent permanente ── */
-        .faq-accordion-item.is-open {
+        /* ── Stato attivo (overlay aperto su questa domanda) ── */
+        .faq-trigger-item.is-active {
           border-color: ${C.borderHi} !important;
+        }
+        .faq-trigger-item.is-active .faq-question-text { color: ${C.acc}; }
+        .faq-trigger-item.is-active .faq-icon-plus     { color: ${C.acc}; transform: rotate(45deg); }
+
+        /* ════════════════════════════════════════════════════
+           OVERLAY HUD — backdrop glassmorphism
+           Flex container: bottom-anchor su mobile, center su desktop.
+        ════════════════════════════════════════════════════ */
+        .faq-overlay {
+          position: fixed;
+          inset: 0;
+          z-index: 9999;
+          display: flex;
+          align-items: flex-end;        /* mobile: bottom sheet */
+          justify-content: center;
+          background: rgba(0,0,0,0);
+          -webkit-backdrop-filter: blur(0px);
+          backdrop-filter: blur(0px);
+          transition: background 0.45s ease, backdrop-filter 0.45s ease, -webkit-backdrop-filter 0.45s ease;
+          will-change: background, backdrop-filter;
+        }
+        .faq-overlay[data-state="open"] {
+          background: rgba(0,0,0,0.6);
+          -webkit-backdrop-filter: blur(10px);
+          backdrop-filter: blur(10px);
         }
 
         /* ════════════════════════════════════════════════════
-           MOBILE — < 768px (iPhone SE, Galaxy S8, ecc.)
+           PANNELLO — Bottom Sheet (mobile, base mobile-first)
+        ════════════════════════════════════════════════════ */
+        .faq-panel {
+          position: relative;
+          width: 100%;
+          max-height: 85vh;
+          display: flex;
+          flex-direction: column;
+          background: ${C.panel};
+          border-top: 1px solid ${C.borderHi};
+          border-left: 1px solid ${C.hair};
+          border-right: 1px solid ${C.hair};
+          border-radius: 20px 20px 0 0;
+          box-shadow: 0 -24px 60px rgba(0,0,0,0.6);
+          padding: 0.6rem clamp(1.4rem, 5vw, 2rem) calc(1.6rem + env(safe-area-inset-bottom, 0px));
+          transform: translateY(101%);
+          transition: transform 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+          will-change: transform;
+          overflow: hidden;
+        }
+        .faq-panel[data-state="open"] { transform: translateY(0); }
+
+        /* texture scanline interna — coerenza brutalista */
+        .faq-panel::before {
+          content: '';
+          position: absolute;
+          inset: 0;
+          pointer-events: none;
+          border-radius: inherit;
+          background-image: repeating-linear-gradient(
+            0deg, transparent, transparent 3px,
+            rgba(240,230,211,0.015) 3px, rgba(240,230,211,0.015) 4px
+          );
+        }
+
+        /* drag handle — solo mobile */
+        .faq-panel-handle {
+          width: 42px;
+          height: 4px;
+          border-radius: 99px;
+          background: ${C.dim};
+          margin: 0.3rem auto 0.9rem;
+          flex-shrink: 0;
+        }
+
+        /* ── HEADER HUD ── */
+        .faq-panel-head {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 1rem;
+          padding-bottom: 1rem;
+          margin-bottom: 1.2rem;
+          border-bottom: 1px solid ${C.hair};
+          flex-shrink: 0;
+        }
+        .faq-panel-meta {
+          display: flex;
+          align-items: center;
+          gap: 0.9rem;
+          min-width: 0;
+        }
+        .faq-panel-index {
+          font-family: ${MONO};
+          font-size: 0.72rem;
+          color: ${C.acc};
+          letter-spacing: 0.08em;
+        }
+        .faq-panel-tag {
+          font-family: ${MONO};
+          font-size: 0.66rem;
+          color: ${C.mut};
+          letter-spacing: 0.14em;
+          text-transform: uppercase;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+
+        /* ── CLOSE BUTTON ── */
+        .faq-panel-close {
+          display: inline-flex;
+          align-items: center;
+          gap: 0.55rem;
+          background: rgba(244,162,97,0.06);
+          border: 1px solid ${C.borderHi};
+          color: ${C.acc};
+          font-family: ${MONO};
+          font-size: 0.66rem;
+          letter-spacing: 0.12em;
+          padding: 0.5rem 0.7rem;
+          border-radius: 6px;
+          cursor: pointer;
+          flex-shrink: 0;
+          -webkit-tap-highlight-color: transparent;
+          touch-action: manipulation;
+          transition: background 0.25s ease, border-color 0.25s ease, color 0.25s ease;
+        }
+        .faq-panel-close:hover {
+          background: ${C.acc};
+          color: ${C.bgDeep};
+        }
+        .faq-panel-close:focus-visible {
+          outline: 2px solid ${C.acc};
+          outline-offset: 2px;
+        }
+        .faq-panel-close-icon { display: inline-flex; }
+
+        /* ── BODY — scroll autonomo, pagina dietro ferma ── */
+        .faq-panel-body {
+          overflow-y: auto;
+          overflow-x: hidden;
+          -webkit-overflow-scrolling: touch;
+          overscroll-behavior: contain;   /* niente scroll-chaining sulla pagina */
+          flex: 1 1 auto;
+          min-height: 0;
+          padding-right: 4px;
+        }
+        .faq-panel-question {
+          font-family: ${FONT};
+          font-weight: 700;
+          font-size: clamp(1.3rem, 5vw, 1.7rem);
+          color: ${C.txt};
+          letter-spacing: -0.02em;
+          line-height: 1.25;
+          margin: 0;
+        }
+        .faq-panel-divider {
+          width: 2.5rem;
+          height: 2px;
+          background: ${C.acc};
+          opacity: 0.7;
+          margin: 1.1rem 0 1.3rem;
+        }
+        .faq-panel-answer {
+          font-family: ${FONT};
+          font-size: clamp(0.95rem, 3.6vw, 1.05rem);
+          color: ${C.mut};
+          line-height: 1.75;
+          margin: 0;
+        }
+
+        /* ── FOOTER HUD ── */
+        .faq-panel-foot {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 1rem;
+          margin-top: 1.4rem;
+          padding-top: 0.9rem;
+          border-top: 1px solid ${C.hair};
+          font-family: ${MONO};
+          font-size: 0.6rem;
+          letter-spacing: 0.12em;
+          color: ${C.dim};
+          flex-shrink: 0;
+        }
+
+        /* ── Scrollbar custom nel pannello ── */
+        .faq-panel-body::-webkit-scrollbar { width: 4px; }
+        .faq-panel-body::-webkit-scrollbar-thumb {
+          background: ${C.borderHi};
+          border-radius: 99px;
+        }
+        .faq-panel-body { scrollbar-width: thin; scrollbar-color: ${C.borderHi} transparent; }
+
+        /* ════════════════════════════════════════════════════
+           DESKTOP >= 768px — MODALE CENTRATO
+        ════════════════════════════════════════════════════ */
+        @media (min-width: 768px) {
+          .faq-overlay { align-items: center; padding: 2rem; }
+
+          .faq-panel {
+            width: 100%;
+            max-width: 600px;
+            max-height: 80vh;
+            border: 1px solid ${C.borderHi};
+            border-radius: 12px;
+            padding: 1.6rem 2rem 1.8rem;
+            box-shadow: 0 30px 80px rgba(0,0,0,0.7);
+            /* entrata: leggero rise + scale (stile card high-tech) */
+            transform: translateY(28px) scale(0.97);
+            opacity: 0;
+            transition: transform 0.46s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.32s ease;
+          }
+          .faq-panel[data-state="open"] {
+            transform: translateY(0) scale(1);
+            opacity: 1;
+          }
+          .faq-panel-handle { display: none; }
+        }
+
+        /* ════════════════════════════════════════════════════
+           MOBILE — < 768px (layout lista)
         ════════════════════════════════════════════════════ */
         @media (max-width: 767px) {
           .hide-mobile { display: none !important; }
-
-          /*
-            TITLE INDENT FIX:
-            "PRIMA DI TUTTO." su desktop è rientrata per
-            un effetto editoriale. Su mobile (< 600px circa)
-            l'indent di clamp(1.5rem,10vw,8rem) crea squilibrio.
-            → azzerato qui.
-          */
           .faq-title-indent { padding-left: 0 !important; }
-
-          /*
-            INDEX SOPRA LA DOMANDA:
-            flex-direction:column rende il layout verticale:
-            [01]          →  desktop: [01]  [Question]
-            [Question]    →  mobile:  [01]
-                                      [Question]
-            align-items:flex-start allinea index a sinistra.
-            gap ridotto: il separamento orizzontale non serve più.
-          */
           .faq-trigger-left {
             flex-direction: column !important;
             align-items: flex-start !important;
             gap: 0.35rem !important;
           }
-
-          /*
-            CONTENT ANSWER:
-            Su mobile il rientro sinistro (allineato alla Q desktop)
-            non è necessario — l'answer inizia al bordo sinistro,
-            più leggibile su schermi < 400px.
-            max-width: 100% evita il "muro di testo" su mobile
-            (72ch risulterebbe troppo largo in relazione al viewport).
-          */
-          .faq-content-inner {
-            padding-left: 0 !important;
-            padding-bottom: 1.5rem !important;
-          }
-          .faq-answer-text {
-            font-size: 0.9rem !important;
-            line-height: 1.68 !important;
-            max-width: 100% !important;
-          }
         }
 
-        /* ── Micro-screen ≤ 360px (Galaxy S8, Pixel 4a) ── */
         @media (max-width: 360px) {
-          .faq-question-text {
-            font-size: 1rem !important;
-          }
+          .faq-question-text { font-size: 1rem !important; }
         }
 
-        /* ── Reduced motion: disabilita transizioni CSS ── */
+        /* ── Reduced motion: niente transizioni ── */
         @media (prefers-reduced-motion: reduce) {
-          .faq-grid-wrapper { transition: none; }
-          .faq-accordion-item { transition: none; }
-          .faq-question-text { transition: none; }
+          .faq-overlay,
+          .faq-panel,
+          .faq-question-text,
+          .faq-icon-plus,
+          .faq-trigger-item { transition: none !important; }
+          .faq-panel { transform: none !important; opacity: 1 !important; }
         }
       `}</style>
     </section>
