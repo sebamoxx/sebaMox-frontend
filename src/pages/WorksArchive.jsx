@@ -47,6 +47,13 @@ if (typeof window !== 'undefined') {
    - Singolarità con Quality Governor a 3 tier (DPR + particelle),
      sprite glow pre-renderizzati, zero allocazioni nel loop.
    - Skew magnetico via gsap.quickTo su UN solo elemento (.world).
+
+   ────────────────────────────────────────────────────────────────────
+   ★ FIX FOUC 3D (refactor del ciclo di vita) — vedi il blocco MAIN:
+     il gsap.context è ora montato UNA SOLA VOLTA e non viene mai
+     distrutto/ricreato quando il sipario (archiveReady) svanisce. Le
+     posizioni Z dei monoliti vengono calcolate "al buio" al mount e
+     sopravvivono intatte al re-render di React (memo + ref stabili).
 ════════════════════════════════════════════════════════════════════ */
 
 /* ═══════════════════════════════════════════════════════════════
@@ -145,7 +152,7 @@ const PROJECTS = [
 const N = PROJECTS.length;
 
 /* ═══════════════════════════════════════════════════════════════
-   COSTANTI DEL MONDO 3D
+   COSTANTI DEL MONDO 3D  ── INVARIATE (requisito #3: non toccare)
 ═══════════════════════════════════════════════════════════════ */
 const SPACING     = 1600;  // distanza Z tra un monolite e il successivo (px)
 const START       = 1200;  // distanza Z del primo monolite dal piano focale
@@ -187,6 +194,12 @@ const SPLINE_SCENE_URL   = 'https://prod.spline.design/QresRyIZehUKtfON/scene.sp
 const TARGET_OBJECT_NAME = 'Battery';
 /* ▲▲▲ INSERISCI QUI I TUOI VALORI ▲▲▲ */
 
+/* ════════════════════════════════════════════════════════════════════
+   ⚠️  KILL-SWITCH PROTETTO (requisito #4) — QUESTO COMPONENTE È INVARIATO.
+   Il Ticker GSAP agganciato all'IntersectionObserver, col trucco
+   visibility:hidden / visibility:visible per spegnere la GPU fuori
+   viewport, funziona perfettamente e NON è stato toccato dal refactor.
+═══════════════════════════════════════════════════════════════════════ */
 const CoreSpline = memo(({ speedRef, reduced, onReady }) => {
   const wrapRef       = useRef(null); // wrapper osservato dall'IntersectionObserver
   const splineAppRef  = useRef(null); // istanza dell'app Spline (salvata in onLoad)
@@ -251,19 +264,19 @@ const CoreSpline = memo(({ speedRef, reduced, onReady }) => {
     };
 
     let attached = false;
-    const attach = () => { 
-      if (!attached) { 
-        gsap.ticker.add(tick); 
+    const attach = () => {
+      if (!attached) {
+        gsap.ticker.add(tick);
         el.style.visibility = 'visible'; // <-- SVEGLIA LA GPU
-        attached = true;  
-      } 
+        attached = true;
+      }
     };
-    const detach = () => { 
-      if (attached) { 
-        gsap.ticker.remove(tick); 
+    const detach = () => {
+      if (attached) {
+        gsap.ticker.remove(tick);
         el.style.visibility = 'hidden'; // <-- IL VERO HARDWARE KILL-SWITCH
-        attached = false; 
-      } 
+        attached = false;
+      }
     };
 
     const io = new IntersectionObserver(
@@ -304,6 +317,11 @@ const CoreSpline = memo(({ speedRef, reduced, onReady }) => {
    MONOLITH — scheda di vetro spaziale (DOM puro, vetro sintetico)
    Statica: posizione 3D impostata UNA volta (gsap.set).
    Dinamica: solo opacity / visibility / classe .is-focus.
+
+   NB FIX: è `memo`. Con refCb / onOpen STABILI (vedi Main) questo
+   componente NON si ri-renderizza mai dopo il mount → React non
+   riscrive lo `style` inline e non stacca/riattacca il nodo, quindi i
+   transform 3D iniettati da GSAP restano intatti per sempre.
 ═══════════════════════════════════════════════════════════════ */
 const Monolith = memo(({ project, refCb, onOpen }) => (
   <article
@@ -369,6 +387,28 @@ const Monolith = memo(({ project, refCb, onOpen }) => (
 
 /* ═══════════════════════════════════════════════════════════════
    MAIN — WORKS ARCHIVE
+   ────────────────────────────────────────────────────────────────
+   ARCHITETTURA DEL CICLO DI VITA (fix del FOUC 3D)
+
+   Il bug nasceva da `archiveReady` nell'array di dipendenze dell'unico
+   useEffect: ogni volta che il sipario svaniva, React eseguiva la
+   cleanup → `gsapCtx.revert()` AZZERAVA tutti gli stili inline scritti
+   da gsap.set() (le translateZ dei monoliti), poi ricreava il context.
+   Nella finestra tra revert e re-init, le card tornavano a Z:0 (enormi,
+   in primo piano) proprio mentre il container diventava visibile.
+
+   La soluzione separa nettamente le responsabilità in DUE effetti:
+
+   • EFFECT A  (mount-once, deps [reducedMotion]) — possiede GSAP.
+     Crea il gsap.context UNA volta, calcola le matrici z/rotationY
+     "al buio" (opacity:0 non impedisce il calcolo dei transform),
+     installa ScrollTrigger e resta in ascolto. NON dipende da
+     archiveReady → non viene MAI revertito al cambio del loader.
+
+   • EFFECT B  (deps [archiveReady]) — NON tocca GSAP.
+     Quando il sipario si alza, ri-asserisce SOLO il frame iniziale
+     (placeMonoliths + applyWorld(0,0)) dentro un requestAnimationFrame,
+     come rete di sicurezza idempotente. Nessun revert, nessuna ricreazione.
 ═══════════════════════════════════════════════════════════════ */
 export default function WorksArchive() {
   const sectionRef  = useRef(null);
@@ -379,8 +419,27 @@ export default function WorksArchive() {
   const monolithEls = useRef([]);
   const tNavigate = useTransitionNavigate();
 
+  /* Ponti verso le funzioni interne al gsap.context, così EFFECT B può
+     ri-forzare il frame iniziale senza ricreare nulla di GSAP. */
+  const applyWorldRef      = useRef(null);
+  const placeMonolithsRef  = useRef(null);
+
   // 1. STATO DI CARICAMENTO GLOBALE DELL'ARCHIVIO
   const [archiveReady, setArchiveReady] = useState(false);
+
+  /* ── REF CALLBACK STABILI (chiave del fix lato React) ───────────────
+     Create una sola volta (lazy-init). Avendo identità immutabile, i
+     <Monolith> memoizzati NON si ri-renderizzano al cambio di state e
+     React non esegue il ciclo detach(null)/attach(el) sul callback ref:
+     i transform inline di GSAP sull'<article> sopravvivono al re-render.  */
+  const monolithRefCbs = useRef(null);
+  if (!monolithRefCbs.current) {
+    monolithRefCbs.current = PROJECTS.map((_, i) => (el) => { monolithEls.current[i] = el; });
+  }
+  const railRefCbs = useRef(null);
+  if (!railRefCbs.current) {
+    railRefCbs.current = PROJECTS.map((_, i) => (el) => { railRefs.current[i] = el; });
+  }
 
   const handleReturnClick = (e) => {
     e.preventDefault();
@@ -398,15 +457,21 @@ export default function WorksArchive() {
   const reducedMotion = typeof window !== 'undefined'
     && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
+  /* ════════════════════════════════════════════════════════════════
+     EFFECT A — GSAP MOUNT-ONCE  (deps: [reducedMotion] — NIENTE archiveReady)
+     Possiede il gsap.context per tutta la vita del componente.
+     Calcola le posizioni 3D "al buio" e installa lo ScrollTrigger.
+  ═══════════════════════════════════════════════════════════════════ */
   useEffect(() => {
 
     const section = sectionRef.current;
     const world   = worldRef.current;
     if (!section || !world) return;
 
-    const isMobile = window.innerWidth < 768;
-
     const gsapCtx = gsap.context(() => {
+      /* ── placeMonoliths: posa statica dei monoliti lungo l'asse Z ──
+         Usa solo window.innerWidth/innerHeight → calcolabile anche con
+         il container a opacity:0 (l'opacity non azzera i transform). */
       const placeMonoliths = () => {
         const W = window.innerWidth;
         const mob = W < 768;
@@ -437,6 +502,9 @@ export default function WorksArchive() {
       let hintHidden = false;
       let lastScrollTs = 0;
 
+      /* ── applyWorld: INVARIATA (requisito #3). Tutta la matematica di
+         culling, opacity, focus, rail e logica visibility:hidden è
+         identica all'originale. */
       const applyWorld = (progress, velocity) => {
         const worldZ = progress * TOTAL_Z;
         zSet(worldZ);
@@ -492,6 +560,12 @@ export default function WorksArchive() {
         }
       };
 
+      /* Espongo le due funzioni a EFFECT B SENZA ricreare GSAP:
+         sono assegnate in modo SINCRONO dentro gsap.context(), quindi
+         pronte prima ancora che EFFECT B (dichiarato dopo) venga eseguito. */
+      placeMonolithsRef.current = placeMonoliths;
+      applyWorldRef.current     = applyWorld;
+
       ScrollTrigger.create({
         trigger: section,
         start: 'top top',
@@ -508,7 +582,16 @@ export default function WorksArchive() {
       };
       gsap.ticker.add(calm);
 
+      /* ── FRAME INIZIALE FORZATO (requisito #2) ─────────────────────
+         1) Sincrono adesso: posa subito i monoliti a Z lontana.
+         2) Su requestAnimationFrame: ri-asserisce DOPO che il layout si
+            è assestato, così nulla (font, reflow, mount) può sovrascrivere
+            la posa iniziale prima del primo paint utile.                */
       applyWorld(0, 0);
+      const raf1 = requestAnimationFrame(() => {
+        placeMonoliths();
+        applyWorld(0, 0);
+      });
 
       let prevW = window.innerWidth;
       let rTimer = 0;
@@ -524,14 +607,35 @@ export default function WorksArchive() {
       window.addEventListener('resize', onResize, { passive: true });
 
       return () => {
+        cancelAnimationFrame(raf1);
         gsap.ticker.remove(calm);
         clearTimeout(rTimer);
         window.removeEventListener('resize', onResize);
+        // I ponti puntano a closure di QUESTO context: azzeriamoli al revert.
+        placeMonolithsRef.current = null;
+        applyWorldRef.current     = null;
       };
     }, section);
 
     return () => gsapCtx.revert();
-  }, [reducedMotion, archiveReady]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reducedMotion]); // ⛔️ archiveReady NON è qui: il context vive una sola volta
+
+  /* ════════════════════════════════════════════════════════════════
+     EFFECT B — RI-ASSERZIONE AL SOLLEVARSI DEL SIPARIO (deps: [archiveReady])
+     NON ricrea GSAP. Quando archiveReady passa a true, forza in modo
+     asincrono (rAF) l'esatto frame iniziale calcolato da EFFECT A, così
+     le card risultano GIÀ lontane (Z:-1200…) nell'istante in cui il
+     container transita da opacity 0 → 1. Rete di sicurezza idempotente.
+  ═══════════════════════════════════════════════════════════════════ */
+  useEffect(() => {
+    if (!archiveReady) return;
+    const id = requestAnimationFrame(() => {
+      placeMonolithsRef.current?.();
+      applyWorldRef.current?.(0, 0);
+    });
+    return () => cancelAnimationFrame(id);
+  }, [archiveReady]);
 
   return (
     <section
@@ -545,7 +649,7 @@ export default function WorksArchive() {
       }}
     >
       {/* SIPARIO DI CARICAMENTO GLOBALE TECH-LUXURY */}
-      <div 
+      <div
         className="zg-global-loader"
         style={{
           position: 'fixed', inset: 0, zIndex: 100,
@@ -564,13 +668,22 @@ export default function WorksArchive() {
       {/* ── LAYER STICKY: la "camera" ─────────────────────────── */}
       <div className="zg-camera">
 
-        {/* Core Spline — scena 3D fissa al centro, sotto i monoliti */}
+        {/* Core Spline — scena 3D fissa al centro, sotto i monoliti (z-index:2) */}
         <CoreSpline speedRef={speedRef} reduced={reducedMotion} onReady={() => setArchiveReady(true)} />
 
-        {/* Tutto il contenuto visivo emerge in sincrono solo quando archiveReady è true */}
+        {/* Tutto il contenuto visivo emerge in sincrono solo quando archiveReady è true.
+            STACKING CONTEXT (requisito #5):
+            - zIndex:10 è INCONDIZIONATO (non dipende da archiveReady).
+            - isolation:'isolate' forza un contesto di impilamento STABILE: con
+              opacity<1 il browser ne crea uno comunque, ma a opacity:1 (fine fade)
+              quel contesto svanirebbe e l'ordine si ricalcolerebbe. Con isolate il
+              contesto c'è SEMPRE → il canvas Spline (z-index:2) non può mai
+              "saltare" davanti alla UI durante o dopo il fade 0→1.            */}
         <div style={{
           position: 'absolute', inset: 0,
           zIndex: 10,
+          isolation: 'isolate',
+          willChange: 'opacity',
           opacity: archiveReady ? 1 : 0,
           transition: 'opacity 0.9s cubic-bezier(0.32, 0.72, 0, 1)'
         }}>
@@ -586,7 +699,7 @@ export default function WorksArchive() {
                   key={p.id}
                   project={p}
                   onOpen={handleOpenProject}
-                  refCb={el => { monolithEls.current[i] = el; }}
+                  refCb={monolithRefCbs.current[i]}
                 />
               ))}
             </div>
@@ -612,7 +725,7 @@ export default function WorksArchive() {
             {PROJECTS.map((p, i) => (
               <span
                 key={p.id}
-                ref={el => { railRefs.current[i] = el; }}
+                ref={railRefCbs.current[i]}
                 className={`zg-rail-dot ${i === 0 ? 'is-here' : ''}`}
               >
                 {String(i + 1).padStart(2, '0')}
@@ -628,13 +741,16 @@ export default function WorksArchive() {
 
       <style>{`
         /* ═══ CAMERA (sticky, niente pin-spacer GSAP) ═══════════
-           100dvh segue la URL bar iOS; fallback 100vh implicito. */
+           100dvh segue la URL bar iOS; fallback 100vh implicito.
+           isolation:isolate → contesto di impilamento radice della
+           camera: Spline(z2) e UI(z10) sono confrontati QUI dentro,
+           in modo deterministico, senza interferenze dall'esterno. */
         .zg-camera {
           position: sticky;
           top: 0;
           height: 100svh;
-          height: 100svh;
           overflow: hidden;
+          isolation: isolate;
         }
 
         /* ═══ MONDO 3D ══════════════════════════════════════════ */
