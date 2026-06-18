@@ -187,12 +187,10 @@ const SPLINE_SCENE_URL   = 'https://prod.spline.design/QresRyIZehUKtfON/scene.sp
 const TARGET_OBJECT_NAME = 'Battery';
 /* ▲▲▲ INSERISCI QUI I TUOI VALORI ▲▲▲ */
 
-const CoreSpline = memo(({ speedRef, reduced }) => {
+const CoreSpline = memo(({ speedRef, reduced, onReady }) => {
   const wrapRef       = useRef(null); // wrapper osservato dall'IntersectionObserver
   const splineAppRef  = useRef(null); // istanza dell'app Spline (salvata in onLoad)
   const targetObjRef  = useRef(null); // oggetto 3D risolto via findObjectByName
-
-  const [isReady, setIsReady] = useState(false);
 
   /* onLoad: Spline è pronto → memorizza l'app e pre-risolve l'oggetto.
      (Se il nome non esiste, targetObjRef resta null e il ticker non fa
@@ -204,8 +202,8 @@ const CoreSpline = memo(({ speedRef, reduced }) => {
     // 2. MASCHERIAMO IL MICROSCATTO
     // Diamo a Spline 100 millisecondi per fare il suo ricalcolo "al buio"
     setTimeout(() => {
-      setIsReady(true);
-    }, 150);
+      onReady(true);
+    }, 200);
   };
 
   /* ── TICKER GSAP + KILL-SWITCH IntersectionObserver ─────────────────
@@ -384,18 +382,9 @@ export default function WorksArchive() {
   const monolithEls = useRef([]);
   const tNavigate = useTransitionNavigate();
 
-  /* ── SYS.RETURN — ritorno chirurgico a #sezione-lavori ─────────────
-   Niente polling qui: la HomePage ha già la pipeline completa
-   (veil nero + scrollToElementWhenReady) che:
-   1. alza il veil PRIMA del paint → la Hero non si vede mai
-   2. aspetta l'elemento lazy via MutationObserver (niente interval)
-   3. aspetta il layout stabile (ResizeObserver su body) → coordinata
-      esatta anche su mobile con immagini/font in caricamento
-   4. scrolla con Lenis immediate:true (o nativo su mobile)
-   5. abbassa il veil e pulisce lo state (history.replaceState)
-   Quella pipeline si attiva SOLO se location.state contiene il
-   target: il vecchio navigate('/') senza state cadeva nel ramo
-   else → lenis.scrollTo(0) → Hero. Tutto qui.                      */
+  // 1. STATO DI CARICAMENTO GLOBALE DELL'ARCHIVIO
+  const [archiveReady, setArchiveReady] = useState(false);
+
   const handleReturnClick = (e) => {
     e.preventDefault();
     tNavigate('/', { state: { scrollTo: 'sezione-lavori' } });
@@ -403,17 +392,19 @@ export default function WorksArchive() {
 
   const handleOpenProject = useCallback((e, link) => {
     e.preventDefault();
-    if (!link || link === '#') return;   // progetti senza pagina: no-op
+    if (!link || link === '#') return;
     tNavigate(link);
   }, [tNavigate]);
 
-  /* Canale velocity verso la Singolarità — ref, mai state */
   const speedRef = useRef(0);
 
   const reducedMotion = typeof window !== 'undefined'
     && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
   useEffect(() => {
+    // 2. BLOCCHIAMO LE ANIMAZIONI DI SCROLL FINCHÉ NON È PRONTO
+    if (!archiveReady) return; 
+
     const section = sectionRef.current;
     const world   = worldRef.current;
     if (!section || !world) return;
@@ -421,11 +412,6 @@ export default function WorksArchive() {
     const isMobile = window.innerWidth < 768;
 
     const gsapCtx = gsap.context(() => {
-
-      /* ── Posizionamento statico dei monoliti ────────────────
-         Quinconce: sinistra / destra alternati, leggera rotazione
-         Y verso il centro, offset verticale alternato per ritmo.
-         Ricalcolato SOLO al resize (dipende dalla larghezza).    */
       const placeMonoliths = () => {
         const W = window.innerWidth;
         const mob = W < 768;
@@ -445,10 +431,6 @@ export default function WorksArchive() {
       };
       placeMonoliths();
 
-      /* ── Setter ad alta frequenza ────────────────────────────
-         quickSetter/quickTo sullo STESSO elemento .world:
-         GSAP fonde z + skewY in un'unica matrice di transform —
-         mai scrivere style.transform a mano in parallelo.        */
       const zSet   = gsap.quickSetter(world, 'z', 'px');
       const skewTo = gsap.quickTo(world, 'skewY', {
         duration: 0.55, ease: 'power3.out',
@@ -460,34 +442,30 @@ export default function WorksArchive() {
       let hintHidden = false;
       let lastScrollTs = 0;
 
-      /* ── Aggiornamento per-frame del mondo ─────────────────── */
       const applyWorld = (progress, velocity) => {
         const worldZ = progress * TOTAL_Z;
         zSet(worldZ);
 
-        /* Velocity → skew magnetico + energia Singolarità */
         const v = Math.max(-1, Math.min(1, velocity / 3200));
         speedRef.current = Math.abs(v);
         if (!reducedMotion) skewTo(v * -3.2);
         lastScrollTs = performance.now();
 
-        /* Hint "scroll to fly" sparisce al primo volo */
         if (!hintHidden && progress > 0.012 && hintRef.current) {
           hintHidden = true;
           gsap.to(hintRef.current, { opacity: 0, duration: 0.8, ease: 'power2.out' });
         }
 
-        /* Per-monolith: depth → opacity + culling + focus */
         let focusIdx = -1;
         for (let i = 0; i < N; i++) {
           const el = monolithEls.current[i];
           if (!el) continue;
-          const d = worldZ - (START + i * SPACING); // 0 = piano focale
+          const d = worldZ - (START + i * SPACING);
           let op;
           if (d > 0) {
-            op = 1 - d / BEHIND_FADE;               // sta passando dietro
+            op = 1 - d / BEHIND_FADE;
           } else {
-            const t = 1 + d / FAR_FADE;             // emerge dall'oscurità
+            const t = 1 + d / FAR_FADE;
             op = t <= 0 ? 0 : Math.pow(t, 1.8);
           }
           op = Math.max(0, Math.min(1, op));
@@ -501,14 +479,12 @@ export default function WorksArchive() {
           if (Math.abs(d) < FOCUS_RANGE) focusIdx = i;
         }
 
-        /* Toggle .is-focus solo quando cambia (niente churn DOM) */
         if (focusIdx !== lastFocus) {
           if (lastFocus >= 0) monolithEls.current[lastFocus]?.classList.remove('is-focus');
           if (focusIdx >= 0)  monolithEls.current[focusIdx]?.classList.add('is-focus');
           lastFocus = focusIdx;
         }
 
-        /* Rail laterale + counter */
         const railIdx = Math.max(0, Math.min(N - 1, Math.round((worldZ - START) / SPACING)));
         if (railIdx !== lastRail) {
           if (lastRail >= 0) railRefs.current[lastRail]?.classList.remove('is-here');
@@ -521,10 +497,6 @@ export default function WorksArchive() {
         }
       };
 
-      /* ── ScrollTrigger: lo scrub del volo ────────────────────
-         Sticky layer in CSS (niente pin-spacer) + un trigger che
-         mappa il progresso della sezione su translateZ del mondo.
-         Funziona con Lenis perché lo scroll resta NATIVO.        */
       ScrollTrigger.create({
         trigger: section,
         start: 'top top',
@@ -533,9 +505,6 @@ export default function WorksArchive() {
         onUpdate: self => applyWorld(self.progress, self.getVelocity()),
       });
 
-      /* ── Decadimento skew quando lo scroll si ferma ──────────
-         ScrollTrigger.onUpdate tace a scroll fermo: un ticker
-         leggerissimo riporta lo skew a zero dopo 140ms di quiete. */
       const calm = () => {
         if (performance.now() - lastScrollTs > 140 && speedRef.current > 0.001) {
           speedRef.current = 0;
@@ -544,10 +513,8 @@ export default function WorksArchive() {
       };
       gsap.ticker.add(calm);
 
-      /* Primo paint (prima di qualsiasi scroll) */
       applyWorld(0, 0);
 
-      /* ── Resize: ricolloca i monoliti (width-dependent) ────── */
       let prevW = window.innerWidth;
       let rTimer = 0;
       const onResize = () => {
@@ -561,7 +528,6 @@ export default function WorksArchive() {
       };
       window.addEventListener('resize', onResize, { passive: true });
 
-      /* Cleanup interno al context */
       return () => {
         gsap.ticker.remove(calm);
         clearTimeout(rTimer);
@@ -569,9 +535,8 @@ export default function WorksArchive() {
       };
     }, section);
 
-    /* gsapCtx.revert() uccide ScrollTrigger, quickTo, set e ticker */
     return () => gsapCtx.revert();
-  }, [reducedMotion]);
+  }, [reducedMotion, archiveReady]);
 
   return (
     <section
@@ -584,69 +549,84 @@ export default function WorksArchive() {
         fontFamily: MONO,
       }}
     >
+      {/* SIPARIO DI CARICAMENTO GLOBALE TECH-LUXURY */}
+      <div 
+        className="zg-global-loader"
+        style={{
+          position: 'fixed', inset: 0, zIndex: 100,
+          background: T.void, display: 'flex', flexDirection: 'column',
+          alignItems: 'center', justifyContent: 'center', gap: '1rem',
+          pointerEvents: archiveReady ? 'none' : 'auto',
+          opacity: archiveReady ? 0 : 1,
+          transition: 'opacity 0.6s cubic-bezier(0.32, 0.72, 0, 1)'
+        }}
+      >
+        <span style={{ color: T.amber, fontSize: '0.6rem', letterSpacing: '0.4em', animation: 'zgHint 1.5s ease infinite' }}>
+          INITIALIZING QUANTUM CORE //
+        </span>
+      </div>
+
       {/* ── LAYER STICKY: la "camera" ─────────────────────────── */}
       <div className="zg-camera">
 
         {/* Core Spline — scena 3D fissa al centro, sotto i monoliti */}
-        <CoreSpline speedRef={speedRef} reduced={reducedMotion} />
+        <CoreSpline speedRef={speedRef} reduced={reducedMotion} onReady={() => setArchiveReady(true)} />
 
-        {/* Vignettatura statica */}
-        <div aria-hidden style={{
-          position: 'absolute', inset: 0, zIndex: 3, pointerEvents: 'none',
-          background: 'radial-gradient(ellipse at 50% 50%, transparent 35%, rgba(0,0,0,0.75) 100%)',
-        }} />
+        {/* Tutto il contenuto visivo emerge in sincrono solo quando archiveReady è true */}
+        <div style={{
+          position: 'absolute', inset: 0,
+          opacity: archiveReady ? 1 : 0,
+          transition: 'opacity 0.9s cubic-bezier(0.32, 0.72, 0, 1)'
+        }}>
+          <div aria-hidden style={{
+            position: 'absolute', inset: 0, zIndex: 3, pointerEvents: 'none',
+            background: 'radial-gradient(ellipse at 50% 50%, transparent 35%, rgba(0,0,0,0.75) 100%)',
+          }} />
 
-        {/* ── VIEWPORT 3D ───────────────────────────────────── */}
-        <div className="zg-viewport">
-          <div ref={worldRef} className="zg-world">
+          <div className="zg-viewport">
+            <div ref={worldRef} className="zg-world">
+              {PROJECTS.map((p, i) => (
+                <Monolith
+                  key={p.id}
+                  project={p}
+                  onOpen={handleOpenProject}
+                  refCb={el => { monolithEls.current[i] = el; }}
+                />
+              ))}
+            </div>
+          </div>
+
+          <header className="zg-hud-top">
+            <div style={{ display: 'flex', alignItems: 'center', gap: 'clamp(1rem, 3vw, 2rem)' }}>
+              <a href="/" onClick={handleReturnClick} className="zg-back-btn" aria-label="Torna alla Home">
+                <span className="zg-back-icon" aria-hidden>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="square" strokeLinejoin="miter">
+                    <line x1="19" y1="12" x2="5" y2="12"></line>
+                    <polyline points="12 19 5 12 12 5"></polyline>
+                  </svg>
+                </span>
+                <span>SYS.RETURN</span>
+              </a>
+              <span className="zg-hud-label hide-mobile">WORKS — ARCHIVE //</span>
+            </div>
+            <span ref={counterRef} className="zg-hud-counter">01 / {String(N).padStart(2, '0')}</span>
+          </header>
+
+          <nav className="zg-rail" aria-label="Posizione nell'archivio">
             {PROJECTS.map((p, i) => (
-              <Monolith
+              <span
                 key={p.id}
-                project={p}
-                onOpen={handleOpenProject}
-                refCb={el => { monolithEls.current[i] = el; }}
-              />
-            ))}
-          </div>
-        </div>
-
-        {/* ── HUD: top bar ──────────────────────────────────── */}
-        <header className="zg-hud-top">
-          <div style={{ display: 'flex', alignItems: 'center', gap: 'clamp(1rem, 3vw, 2rem)' }}>
-            
-            {/* Pulsante Back to Home con onClick personalizzato */}
-            <a href="/" onClick={handleReturnClick} className="zg-back-btn" aria-label="Torna alla Home">
-              <span className="zg-back-icon" aria-hidden>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="square" strokeLinejoin="miter">
-                  <line x1="19" y1="12" x2="5" y2="12"></line>
-                  <polyline points="12 19 5 12 12 5"></polyline>
-                </svg>
+                ref={el => { railRefs.current[i] = el; }}
+                className={`zg-rail-dot ${i === 0 ? 'is-here' : ''}`}
+              >
+                {String(i + 1).padStart(2, '0')}
               </span>
-              <span>SYS.RETURN</span>
-            </a>
+            ))}
+          </nav>
 
-            <span className="zg-hud-label hide-mobile">WORKS — ARCHIVE //</span>
+          <div ref={hintRef} className="zg-hint" aria-hidden>
+            SCROLL TO FLY — Z-AXIS NAVIGATION
           </div>
-          
-          <span ref={counterRef} className="zg-hud-counter">01 / {String(N).padStart(2, '0')}</span>
-        </header>
-
-        {/* ── HUD: rail laterale di posizione ───────────────── */}
-        <nav className="zg-rail" aria-label="Posizione nell'archivio">
-          {PROJECTS.map((p, i) => (
-            <span
-              key={p.id}
-              ref={el => { railRefs.current[i] = el; }}
-              className={`zg-rail-dot ${i === 0 ? 'is-here' : ''}`}
-            >
-              {String(i + 1).padStart(2, '0')}
-            </span>
-          ))}
-        </nav>
-
-        {/* ── HUD: hint iniziale ─────────────────────────────── */}
-        <div ref={hintRef} className="zg-hint" aria-hidden>
-          SCROLL TO FLY — Z-AXIS NAVIGATION
         </div>
       </div>
 
