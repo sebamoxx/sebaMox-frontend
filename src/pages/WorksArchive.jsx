@@ -205,7 +205,7 @@ const CoreSpline = memo(({ speedRef, reduced }) => {
     // Diamo a Spline 100 millisecondi per fare il suo ricalcolo "al buio"
     setTimeout(() => {
       setIsReady(true);
-    }, 100);
+    }, 150);
   };
 
   /* ── TICKER GSAP + KILL-SWITCH IntersectionObserver ─────────────────
