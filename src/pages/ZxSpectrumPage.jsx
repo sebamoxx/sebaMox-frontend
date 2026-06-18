@@ -2,7 +2,7 @@ import React, { useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import gsap from 'gsap';
 import { ScrollTrigger } from 'gsap/ScrollTrigger';
-import { Helmet } from 'react-helmet-async';
+import SEO from './components/SEO';
 
 gsap.registerPlugin(ScrollTrigger);
 
@@ -363,17 +363,11 @@ export default function ZxSpectrumPage() {
   return (
     <>
       {/* ── SEO DINAMICA PER QUESTA PAGINA ── */}
-      <Helmet>
-        <title>ZX Spectrum AI Engine | Seba Mollo</title>
-        <meta 
-          name="description" 
-          content="Un algoritmo di ottimizzazione stocastica scritto in C nativo e compilato in WASM, progettato per forzare i limiti hardware degli anni '80." 
-        />
-        <meta property="og:title" content="ZX Spectrum AI Engine | Case Study" />
-        <meta property="og:description" content="Simulated Annealing e WebAssembly applicati a un microprocessore del 1982. Guarda il case study completo." />
-        {/* Se vuoi che la condivisione di questo link mostri la foto di Marilyn, usa il percorso specifico, altrimenti rimetti /images/anteprimaSito.jpg */}
-        <meta property="og:image" content="/images/fotoMonroe.avif" /> 
-      </Helmet>
+      <SEO
+        title="ZX Spectrum AI Engine | Seba Mollo"
+        description="Un algoritmo di ottimizzazione stocastica scritto in C nativo e compilato in WASM, progettato per forzare i limiti hardware degli anni '80." 
+        image="/images/fotoMonroe.avif"
+      />
       {/* ── Inject Global CSS ── */}
       <style>{globalCSS}</style>
 

@@ -4,6 +4,7 @@ import { ScrollTrigger } from 'gsap/ScrollTrigger';
 import { Link, useNavigate } from 'react-router-dom';
 import Spline from '@splinetool/react-spline';
 import { useTransitionNavigate } from '../components/TransitionController';
+import SEO from './components/SEO';
 
 if (typeof window !== 'undefined') {
   gsap.registerPlugin(ScrollTrigger);
@@ -646,6 +647,13 @@ export default function WorksArchive() {
         fontFamily: MONO,
       }}
     >
+      {/* ── SEO DINAMICA PER L'ARCHIVIO LAVORI ── */}
+      <SEO
+        title="Archivio Progetti | Seba Mollo"
+        description="Esplora l'archivio tecnologico: dai motori 3D custom alle interfacce web premium. Sviluppo Frontend React, Animazioni 3D e Backend Python."
+        image="/images/portfolio-preview.jpg" 
+      />
+      
       {/* SIPARIO DI CARICAMENTO GLOBALE TECH-LUXURY */}
       <div
         className="zg-global-loader"

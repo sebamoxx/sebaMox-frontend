@@ -15,7 +15,7 @@ import { useEffect, useRef } from "react";
 import gsap from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
 import { Link } from "react-router-dom";
-import { Helmet } from 'react-helmet-async';
+import SEO from './components/SEO';
 
 gsap.registerPlugin(ScrollTrigger);
 
@@ -425,17 +425,11 @@ export default function ScrubbingWatchHero() {
       aria-label="High End Watch Hero"
     >
       {/* ── SEO DINAMICA PER QUESTA PAGINA ── */}
-      <Helmet>
-        <title>Haute Horlogerie | Scrubbing Sequence | Seba Mollo</title>
-        <meta 
-          name="description" 
-          content="Esplora l'assemblaggio di un orologio di lusso (Calibre 7X) tramite una sequenza canvas ultra-fluida a 240 frame sincronizzata allo scroll." 
-        />
-        <meta property="og:title" content="Haute Horlogerie | WebGL & GSAP Showcase" />
-        <meta property="og:description" content="Animazione Canvas ad altissime performance per il settore luxury. Scorri per esplorare il calibro 7X." />
-        {/* Cambia l'immagine con un bel frame dell'orologio se ne hai uno esportato, altrimenti usa un fallback */}
-        <meta property="og:image" content="/camera-frames/ezgif-frame-120.jpg" /> 
-      </Helmet>
+      <SEO
+        title="Haute Horlogerie | Scrubbing Sequence"
+        description="Esplora l'assemblaggio di un orologio di lusso (Calibre 7X) tramite una sequenza canvas ultra-fluida a 240 frame sincronizzata allo scroll."
+        image="/camera-frames/ezgif-frame-120.jpg" 
+      />
       
       <style>{`
         @keyframes watch-pulse {
