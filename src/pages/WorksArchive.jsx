@@ -289,9 +289,6 @@ const CoreSpline = memo(({ speedRef, reduced, onReady }) => {
         position: 'absolute', inset: 0,
         width: '100%', height: '100%',
         zIndex: 2, pointerEvents: 'none',
-
-        opacity: isReady ? 1 : 0,
-        transition: 'opacity 0.8s cubic-bezier(0.32, 0.72, 0, 1)'
       }}
     >
       <Spline
