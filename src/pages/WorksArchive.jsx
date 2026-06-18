@@ -1,4 +1,4 @@
-import { useEffect, useRef, memo, useCallback } from 'react';
+import { useEffect, useRef, memo, useCallback, useState } from 'react';
 import gsap from 'gsap';
 import { ScrollTrigger } from 'gsap/ScrollTrigger';
 import { Link, useNavigate } from 'react-router-dom';
@@ -192,12 +192,20 @@ const CoreSpline = memo(({ speedRef, reduced }) => {
   const splineAppRef  = useRef(null); // istanza dell'app Spline (salvata in onLoad)
   const targetObjRef  = useRef(null); // oggetto 3D risolto via findObjectByName
 
+  const [isReady, setIsReady] = useState(false);
+
   /* onLoad: Spline è pronto → memorizza l'app e pre-risolve l'oggetto.
      (Se il nome non esiste, targetObjRef resta null e il ticker non fa
       nulla: nessun crash, la scena resta comunque visibile.)            */
   const handleLoad = (app) => {
     splineAppRef.current = app;
     targetObjRef.current = app.findObjectByName(TARGET_OBJECT_NAME) || null;
+
+    // 2. MASCHERIAMO IL MICROSCATTO
+    // Diamo a Spline 100 millisecondi per fare il suo ricalcolo "al buio"
+    setTimeout(() => {
+      setIsReady(true);
+    }, 100);
   };
 
   /* ── TICKER GSAP + KILL-SWITCH IntersectionObserver ─────────────────
@@ -283,6 +291,9 @@ const CoreSpline = memo(({ speedRef, reduced }) => {
         position: 'absolute', inset: 0,
         width: '100%', height: '100%',
         zIndex: 2, pointerEvents: 'none',
+
+        opacity: isReady ? 1 : 0,
+        transition: 'opacity 0.8s cubic-bezier(0.32, 0.72, 0, 1)'
       }}
     >
       <Spline
