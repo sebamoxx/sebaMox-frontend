@@ -287,6 +287,7 @@ const CoreSpline = memo(({ speedRef, reduced }) => {
     <div
       ref={wrapRef}
       aria-hidden
+      className="zg-spline-wrapper"
       style={{
         position: 'absolute', inset: 0,
         width: '100%', height: '100%',
@@ -989,6 +990,11 @@ export default function WorksArchive() {
           pointer-events: none;
           animation: zgHint 2.8s ${EASE} infinite;
         }
+
+        .zg-spline-wrapper {
+          transform: scale(1);
+          transform-origin: center center;
+        }
         @keyframes zgHint { 0%,100%{opacity:0.85} 50%{opacity:0.3} }
 
         /* ═══ MOBILE COLLAPSE (<768px) ══════════════════════════ */
@@ -997,6 +1003,11 @@ export default function WorksArchive() {
           .zg-monolith.zg-wide { width: min(86vw, 420px); }
           .zg-rail { display: none; }
           .zg-name { font-size: clamp(1.3rem, 7vw, 1.8rem); }
+          .zg-spline-wrapper {
+            /* Rimpicciolisce la batteria su smartphone (es. all'80%). 
+              Gioca con questo valore (0.8, 0.75, 0.7) finché non ti piace! */
+            transform: scale(0.80); 
+          }
         }
 
         /* ═══ REDUCED MOTION ════════════════════════════════════ */
