@@ -310,10 +310,6 @@ const ScrollProgress = memo(() => {
     // total cambia solo su resize/rotazione; lo ricalcoliamo anche a scroll fermo
     // (intercetta la crescita del contenuto dai lazy-chunk) — MAI durante lo scroll.
     window.addEventListener('resize', recalcTotal, { passive: true });
-    // L'accordion FAQ (e ogni blocco che cambia altezza) emette 'content-resize':
-    // ricalcoliamo il `total` cachato in modo economico (1 lettura su rAF) → la barra
-    // resta accurata anche mentre il pannello si espande, senza reflow nel frattempo.
-    window.addEventListener('content-resize', recalcTotal, { passive: true });
     // SCROLLER giusto: #root su touch (barra del browser FISSA), window su desktop.
     const scroller = getScrollEl() || window;
 
@@ -383,7 +379,6 @@ const ScrollProgress = memo(() => {
     return () => {
       scroller.removeEventListener('scroll', onScroll);
       window.removeEventListener('resize', recalcTotal);
-      window.removeEventListener('content-resize', recalcTotal);
       cancelAnimationFrame(rafId);
       cancelAnimationFrame(recalcRaf);
       clearTimeout(idleTimer.current);
@@ -1238,40 +1233,6 @@ export default function App() {
       window.removeEventListener('scroll', onScrollMark);
     };
   }, [preloaderDone]);
-
-  /* ── SYNC ALTEZZA CONTENUTO ↔ MOTORE DI SCROLL (canale 'content-resize') ─────
-     Emesso dall'accordion FAQ e da qualsiasi blocco che cambia altezza fuori da
-     un resize/rotazione. Strategia anti-jank, mobile-first:
-       • Lenis.resize() è LEGGERO → chiamato subito ad ogni evento: su desktop i
-         bounds (limit) restano corretti già DURANTE l'animazione, niente clamp/salto.
-       • ScrollTrigger.refresh() è COSTOSO → UNA sola esecuzione in coda (debounce
-         ~160ms ≈ transizione finita) e SOLO a scroll fermo (window.__isScrolling,
-         mantenuto da ScrollProgress), riprovando ogni 200ms. Il ricalcolo dei
-         trigger non cade MAI dentro un gesto → zero strappi, 60fps preservati.
-     Su touch non esistono pin (l'unico è desktop-only) → refresh innocuo. */
-  useEffect(() => {
-    let settleTimer;
-    let retryTimer;
-    const refreshSafely = () => {
-      if (window.__isScrolling) {            // mai durante un gesto di scroll/bounce
-        clearTimeout(retryTimer);
-        retryTimer = setTimeout(refreshSafely, 200);
-        return;
-      }
-      ScrollTrigger.refresh();
-    };
-    const onContentResize = () => {
-      window.__lenis?.resize?.();            // economico: bounds Lenis live (desktop)
-      clearTimeout(settleTimer);
-      settleTimer = setTimeout(refreshSafely, 160);
-    };
-    window.addEventListener('content-resize', onContentResize, { passive: true });
-    return () => {
-      window.removeEventListener('content-resize', onContentResize);
-      clearTimeout(settleTimer);
-      clearTimeout(retryTimer);
-    };
-  }, []);
 
   /* PERF FIX: useCallback → riferimento STABILE passato a <Preloader>. Senza,
      ogni render di App creerebbe una nuova funzione e, dato che Preloader può
