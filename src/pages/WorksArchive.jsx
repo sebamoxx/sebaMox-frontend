@@ -1,4 +1,4 @@
-import { useEffect, useRef, memo, useCallback, useState } from 'react';
+import { useEffect, useRef, memo, useCallback, useState, useLayoutEffect } from 'react';
 import gsap from 'gsap';
 import { ScrollTrigger } from 'gsap/ScrollTrigger';
 import { Link, useNavigate } from 'react-router-dom';
@@ -326,8 +326,7 @@ const CoreSpline = memo(({ speedRef, reduced, onReady }) => {
 const Monolith = memo(({ project, refCb, onOpen }) => (
   <article
     ref={refCb}
-    className={`zg-monolith ${project.wide ? 'zg-wide' : ''}`}
-    style={{ visibility: 'hidden', opacity: 0 }}
+    className={`zg-monolith ${project.wide ? 'zg-wide' : ''} zg-init-hidden`}
   >
     {/* TUTTA la card è il link: superficie di click massima.
         La pillola "OPEN PROJECT" resta come affordance visiva (span). */}
@@ -446,11 +445,15 @@ export default function WorksArchive() {
     tNavigate('/', { state: { scrollTo: 'sezione-lavori' } });
   };
 
+  // ── FIX #2: IMMUTABILITÀ DEL CALLBACK DI NAVIGAZIONE ──
+  const tNavigateRef = useRef(tNavigate);
+  useEffect(() => { tNavigateRef.current = tNavigate; }, [tNavigate]);
+
   const handleOpenProject = useCallback((e, link) => {
     e.preventDefault();
     if (!link || link === '#') return;
-    tNavigate(link);
-  }, [tNavigate]);
+    tNavigateRef.current(link);
+  }, []); // <--- Array vuoto = niente più re-render accidentali per colpa del router
 
   const speedRef = useRef(0);
 
@@ -622,19 +625,14 @@ export default function WorksArchive() {
   }, [reducedMotion]); // ⛔️ archiveReady NON è qui: il context vive una sola volta
 
   /* ════════════════════════════════════════════════════════════════
-     EFFECT B — RI-ASSERZIONE AL SOLLEVARSI DEL SIPARIO (deps: [archiveReady])
-     NON ricrea GSAP. Quando archiveReady passa a true, forza in modo
-     asincrono (rAF) l'esatto frame iniziale calcolato da EFFECT A, così
-     le card risultano GIÀ lontane (Z:-1200…) nell'istante in cui il
-     container transita da opacity 0 → 1. Rete di sicurezza idempotente.
+     EFFECT B — RI-ASSERZIONE AL SOLLEVARSI DEL SIPARIO (FIX #3)
+     Usa useLayoutEffect: agisce sincronicamente PRIMA che il browser 
+     dipinga a schermo la nuova opacità dell'UI, evitando ogni flash.
   ═══════════════════════════════════════════════════════════════════ */
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!archiveReady) return;
-    const id = requestAnimationFrame(() => {
-      placeMonolithsRef.current?.();
-      applyWorldRef.current?.(0, 0);
-    });
-    return () => cancelAnimationFrame(id);
+    placeMonolithsRef.current?.();
+    applyWorldRef.current?.(0, 0);
   }, [archiveReady]);
 
   return (
@@ -771,6 +769,10 @@ export default function WorksArchive() {
         /* ═══ MONOLITI ══════════════════════════════════════════
            Posizione 3D via GSAP (x/y/z/rotationY impostati a JS).
            Qui solo aspetto. Vetro SINTETICO: zero backdrop-filter. */
+        .zg-init-hidden {
+          visibility: hidden;
+          opacity: 0;
+        }
         .zg-monolith {
           position: absolute;
           top: 50%;
