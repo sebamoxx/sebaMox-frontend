@@ -570,6 +570,7 @@ export default function WorksArchive() {
         {/* Tutto il contenuto visivo emerge in sincrono solo quando archiveReady è true */}
         <div style={{
           position: 'absolute', inset: 0,
+          zIndex: 10,
           opacity: archiveReady ? 1 : 0,
           transition: 'opacity 0.9s cubic-bezier(0.32, 0.72, 0, 1)'
         }}>
