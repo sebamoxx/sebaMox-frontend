@@ -155,42 +155,16 @@ const FAQS = [
    6. aria-expanded + aria-controls + aria-hidden su content
    7. minHeight: 48px su button → touch target accessibile
 ═══════════════════════════════════════════════════════════ */
-/* ────────────────────────────────────────────────────────────────────────
-   SCROLLER ATTIVO — deve combaciare con la logica di App.jsx:
-   su touch (pointer:coarse) lo scroll avviene dentro #root (la barra del
-   browser resta fissa); su desktop scrolla il documento. Serve per spegnere
-   lo scroll-anchoring SULLO scroller giusto durante l'apertura dell'accordion.
-──────────────────────────────────────────────────────────────────────── */
-const getScrollerEl = () => {
-  const coarse = typeof window !== 'undefined' &&
-    typeof window.matchMedia === 'function' &&
-    window.matchMedia('(pointer: coarse)').matches;
-  if (coarse) return document.getElementById('root') || document.scrollingElement || document.documentElement;
-  return document.scrollingElement || document.documentElement;
-};
-
 function FaqItem({ faq, index, isOpen, onToggle }) {
   const iconRef    = useRef(null);
-  const wrapperRef = useRef(null);   // .faq-grid-wrapper → osservato per il sync altezza
   const isMounted  = useRef(false);
 
-  /* CLICK HANDLER — oltre al toggle, due mosse anti-"salto" su mobile:
-     1. focus({preventScroll:true}): al tap di un <button> il browser fa uno
-        "scroll-into-view" nativo verso il controllo/area che si espande; con
-        preventScroll lo blocchiamo senza perdere l'accessibilità da tastiera.
-     2. overflow-anchor:'none' sullo scroller PRIMA che parta l'animazione di
-        altezza → niente compensazione automatica di scrollTop frame-per-frame
-        (vedi nota nell'effetto ANCHOR RESTORE). Riattivato a transizione finita.
-     reduced-motion: nessuna animazione → niente da neutralizzare. */
+  /* Stable click handler — onToggle (useCallback dal parent) + index costante.
+     focus({preventScroll:true}) — RULE 4: impedisce lo "scroll-into-view" nativo
+     che il browser farebbe sul <button> appena premuto (un nudge di scroll al
+     tap su mobile). Nient'altro: l'espansione e' delegata AL 100% al CSS/GPU. */
   const handleClick = useCallback((e) => {
-    const btn = e?.currentTarget;
-    try { btn?.focus?.({ preventScroll: true }); } catch { /* Safari datati */ }
-
-    const noAnim = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    if (!noAnim) {
-      const scroller = getScrollerEl();
-      if (scroller) scroller.style.overflowAnchor = 'none';
-    }
+    try { e.currentTarget.focus({ preventScroll: true }); } catch { /* Safari datati */ }
     onToggle(index);
   }, [onToggle, index]);
 
@@ -205,50 +179,6 @@ function FaqItem({ faq, index, isOpen, onToggle }) {
       duration: 0.42,
       ease: 'back.out(1.8)',
     });
-  }, [isOpen]);
-
-  /* ── BRIDGE (mount-once): altezza pannello → motore di scroll ─────────────
-     L'apertura anima grid-template-rows 0fr→1fr (0.52s): l'altezza dello
-     scroller cresce ad ogni frame. Un ResizeObserver, THROTTLED via rAF (max 1
-     evento/frame), emette 'content-resize' per tutta l'animazione E sull'altezza
-     finale assestata. È economico: ScrollProgress (App.jsx) aggiorna solo il suo
-     `total` cachato; il costoso ScrollTrigger.refresh() è debounced lato App.
-     Nessun height-tween JS, nessun reflow per-frame → 60fps anche su low-end. */
-  useEffect(() => {
-    const wrap = wrapperRef.current;
-    if (!wrap || typeof ResizeObserver === 'undefined') return;
-    let rafId = 0;
-    const emit = () => { rafId = 0; window.dispatchEvent(new Event('content-resize')); };
-    const schedule = () => { if (!rafId) rafId = requestAnimationFrame(emit); };
-    const ro = new ResizeObserver(schedule);
-    ro.observe(wrap);
-    return () => {
-      cancelAnimationFrame(rafId);
-      ro.disconnect();
-      // Unmount reale: non lasciare MAI l'anchor disattivato sullo scroller condiviso.
-      const s = getScrollerEl(); if (s) s.style.overflowAnchor = '';
-    };
-  }, []);
-
-  /* ── ANCHOR RESTORE (per-toggle) ──────────────────────────────────────────
-     overflow-anchor è stato spento nel click (così è già 'none' al primo frame
-     animato, prima che gli effetti girino). Qui lo RIACCENDIAMO a transizione
-     finita — mai nel cleanup, per non riattivarlo a metà animazione. transitionend
-     è il segnale autorevole; il safety-timeout copre transizioni interrotte o
-     reduced-motion (dove transitionend non scatta). A fine corsa emettiamo anche
-     un ultimo 'content-resize' → App esegue UN solo refresh scroll-safe. */
-  useEffect(() => {
-    const wrap = wrapperRef.current;
-    if (!wrap) return;
-    const restore = () => { const s = getScrollerEl(); if (s) s.style.overflowAnchor = ''; };
-    const onEnd = (e) => {
-      if (e.propertyName !== 'grid-template-rows') return;
-      restore();
-      window.dispatchEvent(new Event('content-resize'));
-    };
-    wrap.addEventListener('transitionend', onEnd);
-    const safety = setTimeout(restore, 640); // > durata 0.52s: rete di sicurezza
-    return () => { wrap.removeEventListener('transitionend', onEnd); clearTimeout(safety); };
   }, [isOpen]);
 
   // Estrae '01' da 'INDEX//01'
@@ -288,7 +218,6 @@ function FaqItem({ faq, index, isOpen, onToggle }) {
           cursor: 'pointer',
           textAlign: 'left',
           gap: '1.5rem',
-          touchAction: 'manipulation', // no double-tap-zoom/delay → tap pulito, nessuno shift
         }}
       >
         {/*
@@ -372,7 +301,6 @@ function FaqItem({ faq, index, isOpen, onToggle }) {
           Supporto: Chrome 107+, Firefox 107+, Safari 16+ ✓
       ────────────────────────────────────────────────────── */}
       <div
-        ref={wrapperRef}
         id={`faq-panel-${index}`}
         className="faq-grid-wrapper"
         aria-hidden={!isOpen}
@@ -427,6 +355,23 @@ export default function FAQ() {
   const handleToggle = useCallback((index) => {
     setActiveIndex(prev => prev === index ? null : index);
   }, []);
+
+  /* ── RULE 3 — REFRESH POSTICIPATO (l'UNICO intervento JS sullo scroll) ──────
+     L'espansione 0fr→1fr e' delegata AL 100% alla GPU via CSS: durante quei
+     ~520ms il thread JS DORME — niente ResizeObserver, niente letture di layout
+     per-frame → niente thrashing → niente tremolio.
+     Quando il pannello cambia altezza, i trigger di GSAP che stanno SOTTO la FAQ
+     si sfasano: li risincronizziamo UNA SOLA volta, a transizione abbondantemente
+     conclusa (600ms > 520ms), con un banale setTimeout agganciato al cambio di
+     stato. ZERO refresh durante l'animazione. */
+  const didMount = useRef(false);
+  useEffect(() => {
+    if (!didMount.current) { didMount.current = true; return; } // salta il primo render
+    const id = setTimeout(() => {
+      ScrollTrigger.refresh(); // ricalcolo a layout STABILE, fuori dall'animazione
+    }, 600);
+    return () => clearTimeout(id);
+  }, [activeIndex]);
 
   useEffect(() => {
     // Skip animazioni se utente preferisce movimento ridotto
@@ -594,6 +539,18 @@ export default function FAQ() {
 
       {/* ══ CSS GLOBALE ══════════════════════════════════════ */}
       <style>{`
+        /* ════════════════════════════════════════════════════
+           RULE 1 — KILL SCROLL ANCHORING (statico e permanente)
+           Durante un cambio d'altezza il browser riscrive scrollTop per
+           "tenere ferma" un'ancora; con un'animazione multi-frame come
+           0fr→1fr questo diventa il TREMOLIO su mobile. Disattivando
+           l'anchoring sull'INTERO sottoalbero della FAQ, nessun nodo qui
+           dentro viene scelto come ancora → niente compensazione → niente
+           jitter. Regola STATICA, mai iniettata a runtime. */
+        .awwwards-faq-section,
+        .faq-accordion-item,
+        .faq-grid-wrapper { overflow-anchor: none !important; }
+
         /* ── Grid accordion — cuore del fix ──────────────────
            display:grid + transition su grid-template-rows
            è la tecnica più solida per accordion CSS puro.
@@ -601,7 +558,6 @@ export default function FAQ() {
         .faq-grid-wrapper {
           display: grid;
           transition: grid-template-rows 0.52s cubic-bezier(0.16, 1, 0.3, 1);
-          overflow-anchor: none; /* il pannello non viene mai scelto come anchor di scroll */
         }
         /* min-height:0 obbligatorio per collasso a 0fr */
         .faq-grid-inner {
@@ -621,6 +577,9 @@ export default function FAQ() {
         .faq-trigger-btn {
           outline: none;
           -webkit-tap-highlight-color: transparent;
+          /* RULE 4 — niente double-tap-zoom / tap-delay → tap immediato e
+             nessun comportamento touch nativo che possa innescare uno scroll. */
+          touch-action: manipulation;
         }
 
         /* ── Desktop hover — effetti brutalisti ──────────────
