@@ -531,7 +531,7 @@ export default function WorksArchive() {
     }, section);
 
     return () => gsapCtx.revert();
-  }, [reducedMotion]);
+  }, [reducedMotion, archiveReady]);
 
   return (
     <section
