@@ -1,12 +1,34 @@
-# robots.txt per sebamox.dev (SEO Standard)
+# ===================================================================
+# robots.txt — https://sebamox.dev
+# Portfolio React (Vite) + pre-rendering statico per crawler
+# ===================================================================
 
+# --- Regola globale: vale per ogni bot conforme ---
 User-agent: *
-# Blocchiamo le rotte di sistema, admin e API per evitare che vengano indicizzate
-Disallow: /api/
-Disallow: /admin/
-Disallow: /auth/
-Disallow: /config/
-Disallow: /temp/
 
-# Sitemap
+# 1) Blindatura backend Python — niente JSON/dati grezzi nelle SERP
+Disallow: /api/
+Disallow: /auth/
+Disallow: /admin/
+Disallow: /config/
+Disallow: /webhook/
+Disallow: /webhooks/
+Disallow: /internal/
+Disallow: /.env
+Disallow: /*.json$
+
+# 2) Crawl budget — escludo rotte tecniche e parametri inutili
+Disallow: /temp/
+Disallow: /*?*
+
+# 3) Asset statici Vite: ESPLICITAMENTE accessibili (render corretto)
+Allow: /assets/
+Allow: /images/
+Allow: /*.js$
+Allow: /*.css$
+Allow: /*.svg$
+Allow: /*.avif$
+Allow: /*.webp$
+
+# --- Sitemap (URL assoluto) ---
 Sitemap: https://sebamox.dev/sitemap.xml
