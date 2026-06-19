@@ -11,8 +11,8 @@ import { SITE, toAbsolute } from './seo.config';
 
 
 if ('scrollRestoration' in history) {
-      history.scrollRestoration = 'manual';
-    }
+  history.scrollRestoration = 'manual';
+}
 
 gsap.registerPlugin(ScrollTrigger);
 
@@ -176,6 +176,11 @@ const randomLog = () => {
   return typeof e === 'function' ? e() : e;
 };
 
+/* PERF FIX: helper di padding hoistato a livello di modulo. Prima era ridefinito
+   DENTRO il tick dell'orologio → 3 closure allocate ad ogni frame (≈180/s mentre
+   l'HUD è attivo). Ora è una sola funzione condivisa, zero allocazioni nel loop. */
+const pad = (x, l = 2) => String(x).padStart(l, '0');
+
 // ─── SCROLLER CONDIZIONALE (barra del browser SEMPRE fissa su mobile) ────────
 /* Su TOUCH teniamo la barra del browser bloccata facendo scrollare #root invece
    del documento (vedi index.css → @media (pointer:coarse): html/body fissi a
@@ -267,11 +272,13 @@ const ScrollProgress = memo(() => {
       return;
     }
 
+    // PERF FIX: opacity scritta UNA sola volta all'attivazione, non ad ogni
+    // frame. Lo stato visivo è identico (opaco finché attivo), ma eliminiamo
+    // ~60 scritture di style.opacity/s dal loop.
+    el.style.opacity = '1';
     const tick = () => {
       const n = new Date();
-      const pad = (x, l=2) => String(x).padStart(l,'0');
       el.textContent = `SYS_TIME: ${pad(n.getHours())}:${pad(n.getMinutes())}:${pad(n.getSeconds())}.${pad(n.getMilliseconds(),3)}`;
-      el.style.opacity = '1';
       rafClock.current = requestAnimationFrame(tick);
     };
     rafClock.current = requestAnimationFrame(tick);
@@ -824,16 +831,10 @@ const SectionFallback = () => {
         }} />
       </div>
 
-      <style>{`
-        @keyframes fallbackPulse {
-          0%, 100% { opacity: 1; transform: scale(1); }
-          50% { opacity: 0.3; transform: scale(0.8); }
-        }
-        @keyframes fallbackScan {
-          0% { transform: translateX(-100%); }
-          100% { transform: translateX(350%); }
-        }
-      `}</style>
+      {/* PERF FIX: i @keyframes fallbackPulse/fallbackScan sono stati centralizzati
+          nel <style> globale di App (montato UNA sola volta) per non re-iniettarli
+          ad ogni mount di questo fallback in Suspense — sulla home Hero e Sections
+          sospendono insieme, quindi prima finivano due <style> identici nel DOM. */}
     </div>
   );
 };
@@ -913,12 +914,14 @@ function getDocumentOffsetTop(el) {
 function waitForStableLayout(stableMs = 100, maxWait = 6000) {
   return new Promise((resolve) => {
     let timer = null;
+    let maxTimer = null;       // PERF FIX: tracciato per poterlo pulire in finish
     let done  = false;
 
     const finish = () => {
       if (done) return;
       done = true;
       clearTimeout(timer);
+      clearTimeout(maxTimer);  // PERF FIX: niente timer "fantasma" pendente fino a maxWait
       ro.disconnect();
       resolve();
     };
@@ -935,7 +938,7 @@ function waitForStableLayout(stableMs = 100, maxWait = 6000) {
     timer = setTimeout(finish, stableMs);
 
     // Sicurezza assoluta: non bloccare oltre maxWait.
-    setTimeout(finish, maxWait);
+    maxTimer = setTimeout(finish, maxWait);
   });
 }
 
@@ -974,7 +977,10 @@ function scrollToElementWhenReady(id, offset = 0) {
       // 2. Se ScrollTrigger è disponibile, forza un refresh sul layout stabile
       //    così i pin-spacer sono calcolati correttamente prima di misurare.
       if (window.__gsap) {
-        const { ScrollTrigger } = await import('gsap/ScrollTrigger');
+        // PERF FIX: ScrollTrigger è GIÀ importato staticamente in cima al file
+        // (ed è nel bundle), quindi il dynamic import era un microtask inutile.
+        // Uso direttamente il riferimento statico → una `await` in meno prima del
+        // refresh, stessa identica istanza di ScrollTrigger, zero cambi di logica.
         ScrollTrigger.refresh(true);
         // Due rAF: uno per processare il refresh, uno per il paint del browser.
         await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
@@ -1040,9 +1046,25 @@ const CustomCursor = memo(() => {
       let visible = false;
       let isHiddenBySection = false; // Flag per capire se siamo nella WorkSection
 
-      const onMove = (e) => {
+      /* PERF FIX — COALESCING SU rAF ──────────────────────────────────────────
+         I mouse/trackpad ad alto polling emettono fino a ~1000 'mousemove'/s.
+         PRIMA, ad OGNI evento, giravano e.target.closest('.work-section') (un
+         traversal del DOM con match di selettore) + 4 setter quickTo → fino a 16×
+         il lavoro utile per frame, tutto sul main thread.
+         ORA l'handler fa solo O(1) (salva coordinate + target) e schedula UN rAF:
+         la parte costosa gira AL MASSIMO una volta per frame — la stessa cadenza
+         con cui il ticker GSAP interpola comunque (quickTo riceve solo il valore
+         target finale, quindi alimentarlo 1×/frame è esattamente sufficiente).
+         Reattività visiva identica, CPU a una frazione.
+         La logica di business (closest / visible / isHiddenBySection, durate,
+         set 1:1) è INVARIATA: è solo stata spostata dentro render(). */
+      let lastX = 0, lastY = 0, lastTarget = null;
+      let frame = 0;
+
+      const render = () => {
+        frame = 0;
         // 1. Controlla se il cursore si trova sopra la WorkSection
-        if (e.target.closest('.work-section')) {
+        if (lastTarget && lastTarget.closest('.work-section')) {
           if (!isHiddenBySection) {
             gsap.to([ring, dot], { opacity: 0, duration: 0.2 });
             isHiddenBySection = true;
@@ -1059,12 +1081,23 @@ const CustomCursor = memo(() => {
 
         // 3. Muovi il cursore solo se non è nascosto (risparmia CPU)
         if (!isHiddenBySection) {
-          rX(e.clientX); rY(e.clientY); dX(e.clientX); dY(e.clientY);
+          rX(lastX); rY(lastY); dX(lastX); dY(lastY);
         }
       };
 
-      window.addEventListener('mousemove', onMove);
-      return () => window.removeEventListener('mousemove', onMove);
+      const onMove = (e) => {
+        lastX = e.clientX;
+        lastY = e.clientY;
+        lastTarget = e.target;
+        if (!frame) frame = requestAnimationFrame(render);
+      };
+
+      // passive: nessun preventDefault qui → hint corretto al browser.
+      window.addEventListener('mousemove', onMove, { passive: true });
+      return () => {
+        window.removeEventListener('mousemove', onMove);
+        cancelAnimationFrame(frame);
+      };
     });
     return () => mm.revert();
   }, []);
@@ -1107,11 +1140,11 @@ const HomePage = () => {
         const _root = getScrollEl();
         const elT = document.getElementById(targetId);
         if (elT) {
-          let top = 0, node = elT;
-          while (node && node !== document.body && node !== document.documentElement) {
-            top += node.offsetTop;
-            node = node.offsetParent;
-          }
+          /* PERF FIX: riuso getDocumentOffsetTop (stesso identico algoritmo di
+             traversal offsetParent documentato sopra) invece di duplicarlo inline.
+             Una sola sorgente di verità → zero rischio di divergenza futura, e il
+             calcolo anti-salto resta esattamente quello già validato. */
+          const top = getDocumentOffsetTop(elT);
           if (_root) _root.scrollTop = top;
           else if (window.__lenis) window.__lenis.scrollTo(top, { immediate: true, duration: 0 });
         }
@@ -1206,18 +1239,20 @@ export default function App() {
        evitare). SOLUZIONE: un flag isScrolling; finché è attivo il refresh
        viene RIMANDATO (riprovato ogni 200ms) e parte solo quando lo scroll è
        fermo da ~150ms → il ricalcolo non avviene MAI durante un gesto. */
-    let isScrolling = false;
-    let idleTimer;
+    /* PERF FIX: NON registro più un secondo listener 'scroll' dedicato qui.
+       Riuso il flag globale window.__isScrolling, già mantenuto da ScrollProgress
+       sul giusto scroller (#root su touch, window su desktop). Doppio vantaggio:
+         (1) un listener scroll + un idle-timer in meno sul main thread per tutta
+             la vita della home (zero duplicazione di lavoro);
+         (2) CORREGGE il mobile — il vecchio listener era su `window`, che NON
+             scrolla quando lo scroller è #root → isScrolling restava SEMPRE false
+             e il refresh poteva partire DURANTE un gesto (micro-salto). Ora il
+             deferral vale anche su touch.
+       Se ScrollProgress non fosse montato, il flag è undefined (falsy) → refresh
+       immediato = identico comportamento al precedente fallback. */
     let retryTimer;
-    const onScrollMark = () => {
-      isScrolling = true;
-      clearTimeout(idleTimer);
-      idleTimer = setTimeout(() => { isScrolling = false; }, 150);
-    };
-    window.addEventListener('scroll', onScrollMark, { passive: true });
-
     const safeRefresh = () => {
-      if (isScrolling) {
+      if (window.__isScrolling) {
         retryTimer = setTimeout(safeRefresh, 200); // utente in scroll → rimanda
         return;
       }
@@ -1229,9 +1264,7 @@ export default function App() {
     return () => {
       clearTimeout(id1);
       clearTimeout(id2);
-      clearTimeout(idleTimer);
       clearTimeout(retryTimer);
-      window.removeEventListener('scroll', onScrollMark);
     };
   }, [preloaderDone]);
 
@@ -1299,6 +1332,14 @@ export default function App() {
         <style>{`
           @keyframes cursorBlink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
           @media (max-width: 767px) { .hide-mobile { display: none !important; } }
+          @keyframes fallbackPulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.3; transform: scale(0.8); }
+          }
+          @keyframes fallbackScan {
+            0% { transform: translateX(-100%); }
+            100% { transform: translateX(350%); }
+          }
         `}</style>
       </BrowserRouter>
 
