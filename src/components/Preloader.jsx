@@ -15,16 +15,21 @@ import gsap from 'gsap';
               dal progresso di boot (0→1): più il backend si sveglia,
               più il Core accelera, si illumina e respira.
 
-   Audio    : sintesi procedurale pura (zero asset). Drone sub-bass
-              detunato con LFO sul filtro (Villeneuve), tick aptici
-              a banda stretta sugli eventi di log, "braam" finale
-              in caduta di pitch al momento dell'uplink.
+   Audio    : sintesi procedurale pura (zero asset) — motore "Aether".
+              Catena master a brickwall-limiter per spingere a 0dBFS,
+              drone sub-bass STEREO detunato, tick aptici croccanti,
+              "braam" finale saturato a valvola (WaveShaper) con sub
+              boom da far tremare la sedia. Cfr. Dune / BR2049 / Zimmer.
 
    Performance:
    - Canvas 2D singolo, un solo rAF, geometria pre-allocata,
      ZERO allocazioni nel loop di draw.
+   - ridgeNoise inlinato con ricorrenza trigonometrica (rotazione di
+     fase): trig solo per-RIGA, non per-vertice → ~60× meno sin/cos.
+   - Additive blending ('lighter') per il glow ottico ambra senza
+     shadowBlur (che è un killer di fill-rate).
    - Quality Governor adattivo a 3 tier: misura il frame-time medio
-     e degrada DPR/densità finché non tiene i 60fps (vedi sotto).
+     e degrada DPR/densità finché non tiene i 60fps.
    - 100dvh + fallback --real-vh, resize intelligente (ignora la
      URL bar iOS), touch-lock sul body, cleanup chirurgico.
 ════════════════════════════════════════════════════════════════════ */
@@ -106,116 +111,182 @@ function buildIcosahedron() {
 }
 const ICO = buildIcosahedron();
 
-/* Pseudo-noise deterministico per il terreno-dati:
-   somma di sinusoidi sfasate — zero costo di memoria, look organico */
-function ridgeNoise(x, z, t) {
-  return Math.sin(x * 2.10 + z * 1.30 + t * 0.50) * 0.45
-       + Math.sin(x * 4.70 - z * 2.20 + t * 0.32) * 0.25
-       + Math.cos(x * 1.20 + z * 3.10 - t * 0.21) * 0.30;
-}
+/* ─────────────────────────────────────────────────────────────────
+   ridgeNoise — REFERENCE IMPLEMENTATION (NON usata nel loop)
+   Somma di 3 sinusoidi sfasate: zero memoria, look organico.
+   Nel render path NON la chiamiamo: il terreno la inlina con una
+   ricorrenza di rotazione (vedi draw → sezione TERRENO), che calcola
+   sin/cos UNA sola volta per riga e poi avanza la fase per colonna
+   con sole 6 moltiplicazioni — eliminando migliaia di Math.sin/frame.
+       term1: sin(x·2.10 + z·1.30 + t·0.50) · 0.45
+       term2: sin(x·4.70 − z·2.20 + t·0.32) · 0.25
+       term3: cos(x·1.20 + z·3.10 − t·0.21) · 0.30
+───────────────────────────────────────────────────────────────── */
 
 
 /* ═══════════════════════════════════════════════════════════════
    AUDIO ENGINE "AETHER" — sintesi procedurale pura, zero file
    ───────────────────────────────────────────────────────────────
-   Sound design di riferimento: Dune / Blade Runner 2049.
-   - drone()     : sub-bass detunato (36.7 / 55.1 / 73.4 Hz) dentro
-                   un lowpass la cui frequenza respira via LFO 0.07Hz.
-   - tick()      : click aptico — burst di rumore bandpass 10ms,
-                   frequenza randomizzata → mai due click uguali.
-   - braam()     : impatto finale — sawtooth bassi in caduta di
-                   pitch dentro un lowpass che si chiude (600→80Hz),
-                   più uno shimmer armonico in quinta, quietissimo.
-   - destroy()   : chiusura totale del contesto, zero leak.
+   CATENA MASTER (gain staging cinematografico):
 
-   ⚠️ AUTOPLAY POLICY: init() DEVE avvenire dentro un user-gesture.
-   Viene chiamato nel primo pointerdown/touchstart del GateScreen —
-   il punto più precoce garantito da Safari iOS strict.
+      [sorgenti] → bus(drive) → glue(WaveShaper soft) →
+                 → limiter(brickwall) → master(0.92) → destination
+
+   • bus      : punto di somma "caldo": tutte le voci ci sbattono
+                dentro con headroom negativo, così il limiter lavora
+                sempre e la loudness percepita sale (stile mastering).
+   • glue     : WaveShaper a tanh leggerissimo (drive 1.1). Arrotonda
+                i picchi PRIMA del limiter (soft-clip), aggiunge una
+                seconda/terza armonica di "collante" e ricostruisce la
+                fondamentale mancante → i sub si sentono anche sugli
+                speaker dei telefoni (missing-fundamental psicoacustico).
+   • limiter  : DynamicsCompressor configurato come BRICKWALL —
+                threshold −1.5dBFS, knee 0 (hard), ratio 20:1, attack
+                0.002s (quasi istantaneo), release 0.12s. Tiene i picchi
+                sotto 0dBFS qualunque cosa gli mandi sopra → si può
+                spingere il volume al massimo senza clipping sgradevole.
+
+   API: init / startDrone / stopDrone / tick / braam / destroy / ok
 ═══════════════════════════════════════════════════════════════ */
-/* ═══════════════════════════════════════════════════════════════
-   AUDIO ENGINE "AETHER" — FIX DEFINITIVO PER iOS
-═══════════════════════════════════════════════════════════════ */
+
+/* WaveShaper curve — saturazione "valvolare" via tanh, pre-calcolata.
+   drive alto = più armoniche/grinta; drive basso = solo glue. */
+function buildSatCurve(drive, n = 2048) {
+  const c = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    const x = (i / (n - 1)) * 2 - 1;
+    c[i] = Math.tanh(x * drive); // soft-clip simmetrico, niente alias duri
+  }
+  return c;
+}
+const SAT_WARM = buildSatCurve(2.6); // bassi del braam: caldo, "a valvole"
+const SAT_GLUE = buildSatCurve(1.1); // bus: collante quasi trasparente
+
 function createAudioEngine() {
-  let ctx = null;
-  let master = null;
-  let drone = null;
+  let ctx     = null;
+  let bus     = null;  // punto di somma caldo
+  let limiter = null;  // brickwall finale
+  let master  = null;  // trim d'uscita
+  let drone   = null;
 
-  // 🔥 IL BUG ERA QUI: Non controlliamo più 'running', 
-  // perché iOS impiega qualche millisecondo per attivarsi.
-  // Controlliamo solo che il contesto esista.
-  const ok = () => ctx !== null;
+  // iOS impiega qualche ms per passare a 'running': non controlliamo
+  // lo stato, solo che il contesto e la catena esistano.
+  const ok = () => ctx !== null && bus !== null;
 
   function init() {
     try {
       const Ctx = window.AudioContext || window.webkitAudioContext;
       if (!window.audioCtx) window.audioCtx = new Ctx();
-      ctx = window.audioCtx; // Assegna il contesto globale alla variabile locale
+      ctx = window.audioCtx; // contesto globale condiviso col resto del sito
 
-      // ✨ IL TRUCCO PER iOS: Suoniamo un buffer muto di 1 millisecondo.
-      // Questo forza Safari a "svegliare" l'hardware audio all'istante.
-      const unlockOsc = ctx.createOscillator();
-      const unlockGain = ctx.createGain();
-      unlockGain.gain.value = 0; // Invisibile
-      unlockOsc.connect(unlockGain);
-      unlockGain.connect(ctx.destination);
-      unlockOsc.start(ctx.currentTime);
-      unlockOsc.stop(ctx.currentTime + 0.001);
-
+      // ✨ UNLOCK iOS: un buffer muto da 1 sample forza Safari a
+      // "svegliare" l'hardware audio dentro lo user-gesture corrente.
+      // Eseguito ad OGNI init() (idempotente) → robusto a re-gesture.
+      const unlock = ctx.createBufferSource();
+      unlock.buffer = ctx.createBuffer(1, 1, ctx.sampleRate);
+      unlock.connect(ctx.destination);
+      unlock.start(0);
       if (ctx.state !== 'running') ctx.resume().catch(() => {});
-      
+
+      // La catena master si costruisce UNA volta sola.
+      if (master) return;
+
+      bus = ctx.createGain();
+      bus.gain.value = 1.0;
+
+      const glue = ctx.createWaveShaper();
+      glue.curve = SAT_GLUE;
+      glue.oversample = '4x'; // anti-alias sulla saturazione
+
+      limiter = ctx.createDynamicsCompressor();
+      limiter.threshold.value = -1.5; // ceiling appena sotto 0dBFS
+      limiter.knee.value      = 0;    // hard knee = limiting, non compressione
+      limiter.ratio.value     = 20;   // massimo → brickwall
+      limiter.attack.value    = 0.002;// quasi istantaneo: blocca i transienti
+      limiter.release.value   = 0.12; // veloce ma senza pumping udibile
+
       master = ctx.createGain();
-      const comp = ctx.createDynamicsCompressor();
-      comp.threshold.value = -24;
-      comp.knee.value      = 24;
-      comp.ratio.value     = 6;
-      comp.attack.value    = 0.005;
-      comp.release.value   = 0.30;
-      master.gain.value    = 0.9;
-      master.connect(comp);
-      comp.connect(ctx.destination);
-    } catch (_) { ctx = null; master = null; }
+      master.gain.value = 0.92;       // trim finale (lasciamo respiro al DAC)
+
+      bus.connect(glue);
+      glue.connect(limiter);
+      limiter.connect(master);
+      master.connect(ctx.destination);
+    } catch {
+      ctx = null; bus = null; limiter = null; master = null;
+    }
   }
 
+  /* ── DRONE — sub-bass STEREO detunato, più largo e minaccioso ──
+     Due "voci" identiche detunate ±8 cent e pannate L/R → larghezza
+     stereo e leggero beating organico. Sotto la fondamentale (D1,
+     36.7Hz) aggiungiamo una sub-octave (D0, 18.35Hz) per la minaccia.
+     Un lowpass risonante (Q 1.4) "respira" via LFO 0.06Hz. */
   function startDrone() {
     if (!ok() || drone) return;
-    const now  = ctx.currentTime;
-    const gain = ctx.createGain();
+    const now = ctx.currentTime;
+
+    // Filtro risonante condiviso (respiro lento via LFO sul cutoff)
     const filt = ctx.createBiquadFilter();
     filt.type = 'lowpass';
-    filt.frequency.value = 110;
-    filt.Q.value = 0.7;
+    filt.frequency.value = 130;
+    filt.Q.value = 1.4; // più risonanza = più "denti", più minaccioso
 
     const lfo     = ctx.createOscillator();
     const lfoGain = ctx.createGain();
     lfo.type = 'sine';
-    lfo.frequency.value = 0.07;
-    lfoGain.gain.value  = 45;
+    lfo.frequency.value = 0.06;
+    lfoGain.gain.value  = 70;
     lfo.connect(lfoGain);
     lfoGain.connect(filt.frequency);
     lfo.start(now);
 
-    const oscs = [
-      { f: 36.7, type: 'sine',     v: 0.50 },
-      { f: 55.1, type: 'sine',     v: 0.32 },
-      { f: 73.4, type: 'triangle', v: 0.10 },
-    ].map(({ f, type, v }) => {
-      const osc = ctx.createOscillator();
-      const g   = ctx.createGain();
-      osc.type = type;
-      osc.frequency.value = f;
-      g.gain.value = v;
-      osc.connect(g);
-      g.connect(filt);
-      osc.start(now);
-      return osc;
+    const droneGain = ctx.createGain();
+    droneGain.gain.setValueAtTime(0.0001, now);
+    droneGain.gain.exponentialRampToValueAtTime(0.62, now + 2.2); // più corposo
+
+    filt.connect(droneGain);
+    droneGain.connect(bus);
+
+    const partials = [
+      { f: 18.35, type: 'sine',     v: 0.30 }, // sub-octave (D0): minaccia
+      { f: 36.70, type: 'sine',     v: 0.55 }, // fondamentale (D1)
+      { f: 55.10, type: 'sine',     v: 0.30 }, // quinta
+      { f: 73.40, type: 'triangle', v: 0.12 }, // ottava, un filo di grana
+    ];
+    const voices = [
+      { detune: -8, pan: -0.55 },
+      { detune:  8, pan:  0.55 },
+    ];
+
+    const oscs = [];
+    const canPan = typeof ctx.createStereoPanner === 'function';
+    voices.forEach(({ detune, pan }) => {
+      const vGain = ctx.createGain();
+      vGain.gain.value = 0.5;
+      if (canPan) {
+        const panner = ctx.createStereoPanner();
+        panner.pan.value = pan;
+        vGain.connect(panner);
+        panner.connect(filt);
+      } else {
+        vGain.connect(filt); // fallback mono (vecchi WebView)
+      }
+      partials.forEach(({ f, type, v }) => {
+        const osc = ctx.createOscillator();
+        const g   = ctx.createGain();
+        osc.type = type;
+        osc.frequency.value = f;
+        osc.detune.value = detune;
+        g.gain.value = v;
+        osc.connect(g);
+        g.connect(vGain);
+        osc.start(now);
+        oscs.push(osc);
+      });
     });
 
-    filt.connect(gain);
-    gain.connect(master);
-    gain.gain.setValueAtTime(0.0001, now);
-    gain.gain.exponentialRampToValueAtTime(0.30, now + 1.8);
-
-    drone = { gain, oscs, lfo };
+    drone = { gain: droneGain, oscs, lfo };
   }
 
   function stopDrone(fade = 1.0) {
@@ -230,80 +301,131 @@ function createAudioEngine() {
     drone = null;
   }
 
+  /* ── TICK — click aptico secco, croccante e DIGITALE ──
+     Burst di rumore cortissimo (6ms) attraverso un bandpass stretto
+     (Q 2.2) a frequenza randomizzata → mai due tick uguali. Volume
+     alto e release brevissima: deve BUCARE il mix, non accompagnarlo. */
   function tick() {
     if (!ok()) return;
     const now = ctx.currentTime;
-    const len = Math.floor(ctx.sampleRate * 0.010);
+    const len = Math.floor(ctx.sampleRate * 0.006); // più corto = più secco
     const buf = ctx.createBuffer(1, len, ctx.sampleRate);
     const d   = buf.getChannelData(0);
     for (let i = 0; i < len; i++)
-      d[i] = (Math.random() * 2 - 1) * Math.exp(-i / (len * 0.10));
+      d[i] = (Math.random() * 2 - 1) * Math.exp(-i / (len * 0.06)); // decay strettissimo
     const src = ctx.createBufferSource();
     const bp  = ctx.createBiquadFilter();
     const g   = ctx.createGain();
     src.buffer = buf;
     bp.type = 'bandpass';
-    bp.frequency.value = 2200 + Math.random() * 1400;
-    bp.Q.value = 1.2;
-    g.gain.value = 0.05;
-    src.connect(bp); bp.connect(g); g.connect(master);
+    bp.frequency.value = 2600 + Math.random() * 1800; // 2.6–4.4kHz: presenza/aria
+    bp.Q.value = 2.2;                                  // banda stretta = "digitale"
+    g.gain.setValueAtTime(0.36, now);                  // ~7× più forte di prima
+    g.gain.exponentialRampToValueAtTime(0.0001, now + 0.04); // release cortissima
+    src.connect(bp); bp.connect(g); g.connect(bus);
     src.start(now);
   }
 
+  /* ── BRAAM — l'impatto finale dell'uplink. Deve far tremare la sedia.
+     4 strati:
+       1) IMPACT  : transiente di rumore lowpassato → la "botta" iniziale.
+       2) SUB BOOM: sine 62→28Hz in caduta → chest-thump fisico.
+       3) BODY    : sawtooth detunati in caduta di pitch, spinti dentro un
+                    WaveShaper caldo (SAT_WARM) e un lowpass che si chiude
+                    700→60Hz → il "BRAAAM" ottonato e saturato.
+       4) SHIMMER : quinte/ottave alte, quiete, per lo scintillio in cima.
+     Tutto scommato sul bus caldo: il limiter brickwall tiene i picchi a
+     0dBFS, quindi è ESPLOSIVO ma non sgradevole su mobile. */
   function braam() {
     if (!ok()) return;
     const now = ctx.currentTime;
-    const out = ctx.createGain();
-    const lp  = ctx.createBiquadFilter();
+
+    const braamBus = ctx.createGain();
+    braamBus.gain.value = 1.0;
+    braamBus.connect(bus);
+
+    // 1 · IMPACT — transiente percussivo (la "botta")
+    const impLen = Math.floor(ctx.sampleRate * 0.05);
+    const impBuf = ctx.createBuffer(1, impLen, ctx.sampleRate);
+    const idata  = impBuf.getChannelData(0);
+    for (let i = 0; i < impLen; i++)
+      idata[i] = (Math.random() * 2 - 1) * Math.exp(-i / (impLen * 0.12));
+    const imp   = ctx.createBufferSource();
+    const impLp = ctx.createBiquadFilter();
+    const impG  = ctx.createGain();
+    imp.buffer = impBuf;
+    impLp.type = 'lowpass';
+    impLp.frequency.value = 1800;
+    impG.gain.value = 0.6;
+    imp.connect(impLp); impLp.connect(impG); impG.connect(braamBus);
+    imp.start(now);
+
+    // 2 · SUB BOOM — sine in caduta drammatica: il colpo allo sterno
+    const boom  = ctx.createOscillator();
+    const boomG = ctx.createGain();
+    boom.type = 'sine';
+    boom.frequency.setValueAtTime(62, now);
+    boom.frequency.exponentialRampToValueAtTime(28, now + 0.9);
+    boomG.gain.setValueAtTime(0.0001, now);
+    boomG.gain.exponentialRampToValueAtTime(0.95, now + 0.04); // attacco esplosivo
+    boomG.gain.exponentialRampToValueAtTime(0.0001, now + 2.6);
+    boom.connect(boomG); boomG.connect(braamBus);
+    boom.start(now); boom.stop(now + 2.7);
+
+    // 3 · BODY — ottoni saturati: drive → WaveShaper caldo → lowpass che chiude
+    const drive  = ctx.createGain();
+    drive.gain.value = 2.2; // spinge il segnale dentro la curva di saturazione
+    const shaper = ctx.createWaveShaper();
+    shaper.curve = SAT_WARM;
+    shaper.oversample = '4x';
+    const lp = ctx.createBiquadFilter();
     lp.type = 'lowpass';
-    lp.frequency.setValueAtTime(600, now);
-    lp.frequency.exponentialRampToValueAtTime(80, now + 2.8);
-    lp.Q.value = 0.9;
-    out.gain.setValueAtTime(0.0001, now);
-    out.gain.exponentialRampToValueAtTime(0.55, now + 0.06);
-    out.gain.exponentialRampToValueAtTime(0.0001, now + 3.2);
-    lp.connect(out);
-    out.connect(master);
+    lp.frequency.setValueAtTime(700, now);
+    lp.frequency.exponentialRampToValueAtTime(60, now + 3.0); // si fa cupo
+    lp.Q.value = 1.1;
+    const bodyG = ctx.createGain();
+    bodyG.gain.setValueAtTime(0.0001, now);
+    bodyG.gain.exponentialRampToValueAtTime(0.9, now + 0.07);
+    bodyG.gain.exponentialRampToValueAtTime(0.0001, now + 3.4);
+    drive.connect(shaper); shaper.connect(lp); lp.connect(bodyG); bodyG.connect(braamBus);
 
     [
-      { f: 41.20, type: 'sawtooth', v: 0.50 },
-      { f: 61.74, type: 'sawtooth', v: 0.28 },
-      { f: 82.40, type: 'triangle', v: 0.18 },
-    ].forEach(({ f, type, v }) => {
+      { f: 41.20, type: 'sawtooth', v: 0.55, detune: -7 }, // E1, coppia detunata
+      { f: 41.20, type: 'sawtooth', v: 0.55, detune:  7 }, //     → larghezza/beating
+      { f: 61.74, type: 'sawtooth', v: 0.32, detune:  0 }, // quinta
+      { f: 82.40, type: 'triangle', v: 0.20, detune:  0 }, // ottava
+    ].forEach(({ f, type, v, detune }) => {
       const osc = ctx.createOscillator();
       const g   = ctx.createGain();
       osc.type = type;
+      osc.detune.value = detune;
       osc.frequency.setValueAtTime(f, now);
-      osc.frequency.exponentialRampToValueAtTime(f * 0.96, now + 3.0);
+      osc.frequency.exponentialRampToValueAtTime(f * 0.94, now + 3.2); // drop più marcato
       g.gain.value = v;
-      osc.connect(g); g.connect(lp);
-      osc.start(now); osc.stop(now + 3.3);
+      osc.connect(g); g.connect(drive);
+      osc.start(now); osc.stop(now + 3.5);
     });
 
-    [329.63, 392.00].forEach((f, i) => {
+    // 4 · SHIMMER — scintillio armonico in alto, quietissimo
+    [329.63, 392.00, 493.88].forEach((f, i) => {
       const osc = ctx.createOscillator();
       const g   = ctx.createGain();
-      const t0  = now + 0.15 + i * 0.08;
+      const t0  = now + 0.12 + i * 0.07;
       osc.type = 'sine';
       osc.frequency.value = f;
       g.gain.setValueAtTime(0.0001, t0);
-      g.gain.exponentialRampToValueAtTime(0.035, t0 + 0.4);
+      g.gain.exponentialRampToValueAtTime(0.05, t0 + 0.35);
       g.gain.exponentialRampToValueAtTime(0.0001, t0 + 2.2);
-      osc.connect(g); g.connect(master);
+      osc.connect(g); g.connect(braamBus);
       osc.start(t0); osc.stop(t0 + 2.4);
     });
   }
 
   function destroy() {
-    try { stopDrone(0.05); } catch (_) {}
-    
-    // ✨ MODIFICA QUI: Commenta o elimina ctx.close()
-    // ctx?.close().catch(() => {}); 
-    
-    // Rimuoviamo solo i riferimenti locali al Preloader, 
-    // ma lasciamo vivo window.audioCtx per le altre pagine!
-    master = null; 
-    drone = null;
+    try { stopDrone(0.05); } catch { /* engine già spento: ignora */ }
+    // NON chiudiamo ctx: window.audioCtx resta vivo per le altre pagine.
+    // Rilasciamo solo i riferimenti locali al Preloader.
+    bus = null; limiter = null; master = null; drone = null;
   }
 
   return { init, startDrone, stopDrone, tick, braam, destroy, ok };
@@ -376,11 +498,11 @@ const DecodeLine = memo(({ text, accent, onReveal }) => {
 
 /* ═══════════════════════════════════════════════════════════════
    GATE SCREEN — sblocco AudioContext al primissimo touch
-   init() su pointerdown E touchstart E click (tripla rete):
-   copre Safari iOS strict, vecchi WebView in-app, desktop.
-═══════════════════════════════════════════════════════════════ */
-/* ═══════════════════════════════════════════════════════════════
-   GATE SCREEN — sblocco AudioContext al primissimo touch
+   ───────────────────────────────────────────────────────────────
+   L'engine viene creato EAGER dal Preloader (audioRef già popolato),
+   quindi qui init()/startDrone() girano DENTRO lo user-gesture reale
+   (pointerdown/touchstart/click) — l'unico punto in cui Safari iOS
+   strict autorizza il risveglio dell'hardware audio.
 ═══════════════════════════════════════════════════════════════ */
 function GateScreen({ onEnter, audioRef }) {
   const gateRef = useRef(null);
@@ -395,19 +517,15 @@ function GateScreen({ onEnter, audioRef }) {
     return () => tween.kill();
   }, []);
 
+  // Unlock il più precoce possibile: già su pointerdown/touchstart.
   const initAudio = useCallback(() => {
-    if (audioRef.current && typeof audioRef.current.init === 'function') {
-      audioRef.current.init();
-    }
+    audioRef.current?.init?.();
   }, [audioRef]);
 
   const handleClick = () => {
-    initAudio(); 
-    
-    // Suona subito per aggirare i blocchi di iOS!
-    if (audioRef.current && typeof audioRef.current.startDrone === 'function') {
-      audioRef.current.startDrone();
-    }
+    initAudio();
+    // Avvia il drone DENTRO il gesture per aggirare i blocchi iOS.
+    audioRef.current?.startDrone?.();
 
     gsap.to(gateRef.current, {
       opacity: 0,
@@ -461,10 +579,10 @@ function GateScreen({ onEnter, audioRef }) {
           SEBASTIANO MOLLO — CREATIVE DEVELOPER
         </div>
 
-        {/* ✨ NUOVO: Modulo Premium "Alza il Volume" */}
+        {/* Modulo Premium "Alza il Volume" */}
         <div style={{
           display: 'flex', alignItems: 'center', gap: '0.6rem',
-          marginBottom: '-0.4rem', // Avvicina leggermente questo blocco al pulsante principale
+          marginBottom: '-0.4rem',
           color: T.amber, opacity: 0.85
         }}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
@@ -514,7 +632,7 @@ function GateScreen({ onEnter, audioRef }) {
    ───────────────────────────────────────────────────────────────
    props (via ref, MAI via state → zero re-render React):
    - energyRef : 0..1, progresso di boot → guida velocità/alpha
-   - flareRef  : 0..1, flash bianco dell'exit sequence
+   - flareRef  : 0..1, flash bianco + camera-shake dell'exit sequence
    - reduced   : prefers-reduced-motion → frame statico singolo
 ═══════════════════════════════════════════════════════════════ */
 const MonolithScene = memo(({ energyRef, flareRef, reduced }) => {
@@ -533,6 +651,8 @@ const MonolithScene = memo(({ energyRef, flareRef, reduced }) => {
 
     /* ── Dimensioni cache (nessuna lettura DOM nel loop) ────── */
     let W = 0, H = 0, dpr = 1;
+    let horizonY = 0;        // y dell'orizzonte (cache per il loop)
+    let atmGrad = null;      // gradiente di foschia atmosferica (cache)
 
     /* ── Buffer pre-allocati per la proiezione del Core ──────
        12 vertici × (x,y) × 2 gusci (outer bone + inner amber).
@@ -561,6 +681,13 @@ const MonolithScene = memo(({ energyRef, flareRef, reduced }) => {
       cv.height = Math.floor(H * dpr);
       ctx2d.setTransform(1, 0, 0, 1, 0, 0);
       ctx2d.scale(dpr, dpr);
+      // Cache derivate dalle dimensioni (mai ricalcolate nel loop)
+      horizonY = H * 0.62;
+      // Foschia atmosferica: banda di glow ambra tenue all'orizzonte
+      atmGrad = ctx2d.createLinearGradient(0, horizonY - H * 0.12, 0, horizonY + H * 0.04);
+      atmGrad.addColorStop(0,    'rgba(216,156,74,0)');
+      atmGrad.addColorStop(0.7,  'rgba(216,156,74,0.05)');
+      atmGrad.addColorStop(1,    'rgba(216,156,74,0)');
     };
     setup();
 
@@ -590,59 +717,113 @@ const MonolithScene = memo(({ energyRef, flareRef, reduced }) => {
         if (avg > FRAME_BUDGET && tierIdx < QUALITY_TIERS.length - 1) {
           tierIdx++;
           tier = QUALITY_TIERS[tierIdx];
-          setup(); // riapplica il nuovo DPR cap
+          setup(); // riapplica il nuovo DPR cap + ricache derivate
         }
       }
 
-      /* ── Clear (canvas opaco → fill pieno, no trasparenza) ── */
+      /* ── Clear (canvas opaco → fill pieno, no trasparenza) ──
+         SEMPRE in transform base e source-over: copre tutto lo
+         schermo anche quando la scena sarà traslata dal shake.   */
+      ctx2d.globalCompositeOperation = 'source-over';
+      ctx2d.globalAlpha = 1;
       ctx2d.fillStyle = T.void;
       ctx2d.fillRect(0, 0, W, H);
 
       const cx = W * 0.5;
       const cy = H * 0.42;
-      const coreScale = Math.min(W, H) * (0.16 + energy * 0.03);
+      // Respiro impercettibile del Core, legato all'energia
+      const breathe = 1 + Math.sin(time * 1.2) * 0.012 * (0.3 + energy);
+      const coreScale = Math.min(W, H) * (0.16 + energy * 0.03) * breathe;
 
-      /* ════ 1 · TERRENO-DATI (ridgeline prospettiche) ════════ */
-      const horizon = H * 0.62;
-      const camH    = H * 0.46;
-      const rows    = tier.terrainRows;
-      const cols    = tier.terrainCols;
-      const tAmp    = H * 0.055 * (0.55 + energy * 0.45);
+      /* ── CAMERA SHAKE — impatto fisico del braam ───────────
+         Quando flare sale (exit), traslo TUTTA la scena con un
+         offset pseudo-random ad alta frequenza. save()/restore()
+         garantisce il ripristino esatto del transform (no drift). */
+      const shaking = flare > 0.003;
+      if (shaking) {
+        ctx2d.save();
+        const mag = flare * Math.min(W, H) * 0.022;
+        const shx = (Math.sin(time * 91.0) * 0.6 + Math.sin(time * 137.0) * 0.4) * mag;
+        const shy = (Math.cos(time * 83.0) * 0.6 + Math.sin(time * 119.0) * 0.4) * mag;
+        ctx2d.translate(shx, shy);
+      }
+
+      /* ════ 1 · TERRENO-DATI (ridgeline prospettiche) ════════
+         ridgeNoise INLINATO con ricorrenza di rotazione: sin/cos
+         calcolati UNA volta per riga, poi la fase avanza per colonna
+         con 6 mul (matrice di rotazione). Zero trig nel loop interno. */
+      const rows = tier.terrainRows;
+      const cols = tier.terrainCols;
+      const camH = H * 0.46;
+      const tAmp = H * 0.055 * (0.55 + energy * 0.45);
+
+      // Delta di fase per-colonna (costanti finché cols non cambia):
+      // x va da -3 a +3 in `cols` passi → stepX = 6/cols.
+      const stepX = 6 / cols;
+      const cd1 = Math.cos(stepX * 2.10), sd1 = Math.sin(stepX * 2.10);
+      const cd2 = Math.cos(stepX * 4.70), sd2 = Math.sin(stepX * 4.70);
+      const cd3 = Math.cos(stepX * 1.20), sd3 = Math.sin(stepX * 1.20);
+      const dtxn = 2 / cols;
+      const energyMix = 0.45 + energy * 0.55;
+
       ctx2d.lineWidth = 1;
       ctx2d.strokeStyle = T.bone;
       for (let j = 0; j < rows; j++) {
         const tz    = j / (rows - 1);          // 0 = vicino, 1 = lontano
         const zd    = 1 + tz * 6;              // profondità
         const persp = 1 / zd;
-        const rowY  = horizon + camH * persp;
+        const rowY  = horizonY + camH * persp;
         const spread = W * 0.95 * (0.4 + persp * 1.6);
-        ctx2d.globalAlpha = (0.04 + 0.16 * (1 - tz)) * (0.5 + energy * 0.5);
+        // Fading atmosferico più profondo: curva pow → maggiore vastità
+        ctx2d.globalAlpha = (0.03 + 0.20 * Math.pow(1 - tz, 1.7)) * energyMix;
+
+        // Stato iniziale della fase a x=-3 (i=0):
+        const a1 = zd * 1.30 + time * 0.50;    // term1 offset
+        const a2 = -zd * 2.20 + time * 0.32;   // term2 offset
+        const a3 = zd * 3.10 - time * 0.21;    // term3 offset
+        let s1 = Math.sin(-6.30 + a1),  c1 = Math.cos(-6.30 + a1);   // -3*2.10
+        let s2 = Math.sin(-14.10 + a2), c2 = Math.cos(-14.10 + a2);  // -3*4.70
+        let s3 = Math.sin(-3.60 + a3),  c3 = Math.cos(-3.60 + a3);   // -3*1.20
+
+        let txn = -1;
         ctx2d.beginPath();
         for (let i = 0; i <= cols; i++) {
-          const txn  = (i / cols) * 2 - 1;     // -1..1
           // Maschera centrale: il terreno si placa sotto il Core
-          const mask = Math.min(1, Math.abs(txn) * 1.5 + 0.12);
-          const yOff = ridgeNoise(txn * 3, zd, time) * tAmp * persp * mask;
-          const x    = cx + txn * spread;
-          const y    = rowY - yOff;
+          const mask  = Math.min(1, Math.abs(txn) * 1.5 + 0.12);
+          const yNo   = s1 * 0.45 + s2 * 0.25 + c3 * 0.30; // noise ricostruito
+          const yOff  = yNo * tAmp * persp * mask;
+          const x     = cx + txn * spread;
+          const y     = rowY - yOff;
           if (i === 0) ctx2d.moveTo(x, y);
           else         ctx2d.lineTo(x, y);
+          // Avanza la fase di un passo-colonna (rotazione, niente trig)
+          const n1 = s1 * cd1 + c1 * sd1; c1 = c1 * cd1 - s1 * sd1; s1 = n1;
+          const n2 = s2 * cd2 + c2 * sd2; c2 = c2 * cd2 - s2 * sd2; s2 = n2;
+          const n3 = s3 * cd3 + c3 * sd3; c3 = c3 * cd3 - s3 * sd3; s3 = n3;
+          txn += dtxn;
         }
         ctx2d.stroke();
       }
 
-      /* ════ 2 · SCAN SWEEP (hairline ambra che scende) ═══════ */
+      // Foschia atmosferica all'orizzonte (additivo, una sola rect)
+      ctx2d.globalCompositeOperation = 'lighter';
+      ctx2d.globalAlpha = 0.5 + energy * 0.5;
+      ctx2d.fillStyle = atmGrad;
+      ctx2d.fillRect(0, horizonY - H * 0.12, W, H * 0.16);
+
+      /* ════ 2 · SCAN SWEEP (hairline ambra additiva) ═════════ */
       const sweepY = ((time * 0.045) % 1.25 - 0.12) * H;
-      ctx2d.globalAlpha = 0.07 + energy * 0.05;
+      ctx2d.globalAlpha = 0.10 + energy * 0.07;
       ctx2d.strokeStyle = T.amber;
       ctx2d.beginPath();
       ctx2d.moveTo(0, sweepY);
       ctx2d.lineTo(W, sweepY);
       ctx2d.stroke();
+      ctx2d.globalCompositeOperation = 'source-over';
 
-      /* ════ 3 · IL CORE (icosaedro doppio guscio) ════════════ */
-      // La velocità di rotazione cresce con l'energia: il backend
-      // "si sveglia" e il Core accelera.
+      /* ════ 3 · IL CORE (icosaedro doppio guscio) ════════════
+         La velocità di rotazione cresce con l'energia: il backend
+         "si sveglia" e il Core accelera. */
       const spin = 0.10 + energy * 0.55;
       ax += dt * spin * 0.7;
       ay += dt * spin;
@@ -672,27 +853,38 @@ const MonolithScene = memo(({ energyRef, flareRef, reduced }) => {
         projInner[i * 2 + 1] = cy + y1 * s * coreScale * 0.55;
       }
 
-      // Spigoli outer — hairline bone
+      // Spigoli outer — hairline bone (UNA sola path, UNO stroke)
       ctx2d.globalAlpha = 0.22 + energy * 0.45;
       ctx2d.strokeStyle = T.bone;
       ctx2d.beginPath();
       for (let e = 0; e < ICO.edges.length; e++) {
-        const [a, b] = ICO.edges[e];
+        const a = ICO.edges[e][0], b = ICO.edges[e][1];
         ctx2d.moveTo(projOuter[a * 2], projOuter[a * 2 + 1]);
         ctx2d.lineTo(projOuter[b * 2], projOuter[b * 2 + 1]);
       }
       ctx2d.stroke();
 
-      // Spigoli inner — ambra, più tenue
-      ctx2d.globalAlpha = 0.10 + energy * 0.30;
+      // BLOOM additivo sul guscio outer ad alta energia: un secondo
+      // stroke 'lighter' tenue → alone ottico senza shadowBlur.
+      if (energy > 0.45) {
+        ctx2d.globalCompositeOperation = 'lighter';
+        ctx2d.globalAlpha = (energy - 0.45) * 0.5;
+        ctx2d.stroke(); // riusa la path corrente: zero ricostruzione
+        ctx2d.globalCompositeOperation = 'source-over';
+      }
+
+      // Spigoli inner — ambra additiva: le intersezioni creano GLOW
+      ctx2d.globalCompositeOperation = 'lighter';
+      ctx2d.globalAlpha = 0.12 + energy * 0.34;
       ctx2d.strokeStyle = T.amber;
       ctx2d.beginPath();
       for (let e = 0; e < ICO.edges.length; e++) {
-        const [a, b] = ICO.edges[e];
+        const a = ICO.edges[e][0], b = ICO.edges[e][1];
         ctx2d.moveTo(projInner[a * 2], projInner[a * 2 + 1]);
         ctx2d.lineTo(projInner[b * 2], projInner[b * 2 + 1]);
       }
       ctx2d.stroke();
+      ctx2d.globalCompositeOperation = 'source-over';
 
       // Vertici outer — punti 2×2 (fillRect: più economico di arc)
       ctx2d.globalAlpha = 0.5 + energy * 0.5;
@@ -701,8 +893,9 @@ const MonolithScene = memo(({ energyRef, flareRef, reduced }) => {
         ctx2d.fillRect(projOuter[i * 2] - 1, projOuter[i * 2 + 1] - 1, 2, 2);
       }
 
-      /* ════ 4 · PARTICELLE ORBITALI ══════════════════════════ */
+      /* ════ 4 · PARTICELLE ORBITALI (ambra additiva) ═════════ */
       const nP = tier.particles;
+      ctx2d.globalCompositeOperation = 'lighter';
       ctx2d.fillStyle = T.amber;
       for (let i = 0; i < nP; i++) {
         const ang = pPh[i] + time * pS[i] * (0.5 + energy);
@@ -719,13 +912,25 @@ const MonolithScene = memo(({ energyRef, flareRef, reduced }) => {
           1.5, 1.5
         );
       }
+      ctx2d.globalCompositeOperation = 'source-over';
+
+      // Chiudo il blocco "scena": ripristino il transform base prima
+      // del flare (che deve coprire l'intero schermo, shake escluso).
+      if (shaking) ctx2d.restore();
 
       /* ════ 5 · FLARE (flash dell'exit sequence) ═════════════ */
       if (flare > 0.003) {
+        ctx2d.globalCompositeOperation = 'source-over';
         ctx2d.globalAlpha = flare * 0.9;
         ctx2d.fillStyle = T.bone;
         ctx2d.fillRect(0, 0, W, H);
+        // Wash ambra additivo: il flash "scalda" verso l'accento
+        ctx2d.globalCompositeOperation = 'lighter';
+        ctx2d.globalAlpha = flare * 0.25;
+        ctx2d.fillStyle = T.amber;
+        ctx2d.fillRect(0, 0, W, H);
       }
+      ctx2d.globalCompositeOperation = 'source-over';
       ctx2d.globalAlpha = 1;
     };
 
@@ -814,6 +1019,16 @@ export default function Preloader({ onComplete }) {
 
   const onLogReveal = useCallback(() => { audioRef.current?.tick(); }, []);
 
+  /* ── [AUDIO] Creazione EAGER dell'engine + distruzione al dismount ──
+     Creiamo l'engine subito (non istanzia ancora alcun AudioContext:
+     quello nasce in init(), dentro lo user-gesture del GateScreen).
+     Così audioRef.current è già pronto quando il gate riceve il touch,
+     e l'unlock iOS avviene nel momento esatto autorizzato da Safari.   */
+  useEffect(() => {
+    if (!audioRef.current) audioRef.current = createAudioEngine();
+    return () => { audioRef.current?.destroy(); audioRef.current = null; };
+  }, []);
+
   /* ── [VH] Fallback --real-vh per Safari iOS < 15.4 ─────────── */
   useEffect(() => {
     const setRealVH = () => {
@@ -842,15 +1057,10 @@ export default function Preloader({ onComplete }) {
     };
   }, []);
 
-  /* ── [AUDIO] Distruzione totale del contesto al dismount ───── */
-  useEffect(() => {
-    return () => { audioRef.current?.destroy(); audioRef.current = null; };
-  }, []);
-
   /* ── EXIT SEQUENCE ──────────────────────────────────────────
      1. pointer-events off (il preloader smette di catturare input)
      2. braam audio + drone fade-out
-     3. flare bianco sul canvas (via flareRef, tweenata da GSAP)
+     3. flare bianco sul canvas + camera-shake (via flareRef, GSAP)
      4. il counter scivola su dentro la maschera
      5. iris collapse: clip-path verso la linea centrale
      6. estinzione, rimozione will-change, onComplete            */
@@ -889,18 +1099,20 @@ export default function Preloader({ onComplete }) {
       .to(el, { opacity: 0, duration: 0.22, ease: 'power2.out', force3D: true }, '-=0.10');
   }, [reducedMotion, onComplete]);
 
-  exitRef.current = exitSequence;
+  // Tieni exitRef allineato all'ultima closure (legge reducedMotion/onComplete
+  // correnti). In un effect, non durante il render: il ref viene letto solo
+  // ~4.4s dopo, al termine della boot timeline → sempre già popolato.
+  useEffect(() => { exitRef.current = exitSequence; }, [exitSequence]);
 
-  /* ── GATE ENTER → avvia drone + boot ───────────────────────── */
+  /* ── GATE ENTER → ensure-resume + avvio boot ───────────────────
+     L'engine è già inizializzato dentro il gesture del GateScreen
+     (init + startDrone). Qui ci limitiamo a un init() idempotente
+     (re-resume di sicurezza) e a far partire la boot sequence.     */
   const handleGateEnter = useCallback(() => {
-    if (!audioRef.current) {
-      const audio = createAudioEngine();
-      audio.init();
-      audioRef.current = audio;
-    }
-    // Ho rimosso la riga che faceva partire il drone qui in ritardo
+    audioRef.current?.init();
     setBooting(true);
   }, []);
+
   /* ── BOOT SEQUENCE ─────────────────────────────────────────── */
   useEffect(() => {
     if (!booting) return;
