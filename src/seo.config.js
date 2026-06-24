@@ -66,6 +66,12 @@ export const ROUTES = {
       "Esplora l'assemblaggio di un orologio di lusso (Calibre 7X) tramite una sequenza canvas ultra-fluida a 240 frame sincronizzata allo scroll.",
     image: '/camera-frames/ezgif-frame-120.jpg',
   },
+  '/projects/VillaKoi': {
+    title: 'villaKoi | Esperienza Web Full-Stack',
+    description:
+      "villaKoi: case study di un'esperienza web dal respiro Zen. Front-end React con animazioni GSAP ScrollTrigger e backend Python/FastAPI, scalabile e sicuro.",
+    image: '/projects/koiSite.avif',
+  },
 };
 
 // Aggiunge il suffisso del brand al titolo di pagina (o usa il default).
