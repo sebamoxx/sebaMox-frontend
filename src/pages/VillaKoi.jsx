@@ -708,7 +708,7 @@ export default function VillaKoi() {
               Visita il sito live
               <span className="vk-cta-icon"><ArrowUpRight /></span>
             </a>
-            <a className="vk-cta vk-cta-ghost" href="https://github.com/sebamox1-sudo/VillaKoiSite" target="_blank" rel="noopener noreferrer">
+            <a className="vk-cta vk-cta-ghost" href="https://github.com/sebamoxx/VillaKoiSite" target="_blank" rel="noopener noreferrer">
               Codice su GitHub
               <span className="vk-cta-icon"><ArrowUpRight /></span>
             </a>
