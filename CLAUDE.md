@@ -23,13 +23,4 @@ OUTPUT
 Queste modalità sono mutuamente esclusive.
 Se viene selezionata una modalità, ignora le altre.
 
-# Design Context
 
-Registro del progetto: **brand** (il design È il prodotto).
-
-Il contesto strategico e visivo vive in due file alla radice — leggili prima di lavorare sulla UI:
-
-- **`PRODUCT.md`** — chi/cosa/perché: pubblico, scopo, personalità del brand, anti-reference, principi di design, accessibilità.
-- **`DESIGN.md`** — come appare: palette, tipografia, elevazione, componenti, do's & don'ts (formato Google Stitch; token in frontmatter normativi). Sidecar: `.impeccable/design.json`.
-
-I comandi `/impeccable` leggono questi file automaticamente. In conflitto: DESIGN.md prevale sulle scelte visive, PRODUCT.md su quelle strategiche/di voce.

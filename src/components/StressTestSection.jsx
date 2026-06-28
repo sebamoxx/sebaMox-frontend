@@ -1,39 +1,59 @@
-import React, { useRef, useEffect, useState, useCallback } from "react";
+import { useRef, useEffect, useState, useCallback, useId } from "react";
 
 /**
  * ============================================================================
- *  StressTestSection.jsx — "IL SIMULATORE DI COLLASSO"
+ *  StressTestSection.jsx — "IL SIMULATORE DI COLLASSO"  ::  rev 3.0 / GPU
  * ----------------------------------------------------------------------------
  *  Swiss-Cyber Brutalist / High-End Tech interactive panel.
  *
  *  CORE ENGINEERING PHILOSOPHY
  *  ---------------------------
- *  The counter sweeps from 100 -> 50.000 simultaneous users. If we routed
- *  that value through React state at 60fps we would trigger thousands of
- *  reconciliations per hold, tanking the frame budget. Instead:
+ *  The counter sweeps from 100 -> 50.000 simultaneous users. Routing that value
+ *  through React state at 60fps would trigger thousands of reconciliations per
+ *  hold and torch the frame budget. So everything that animates lives in
+ *  `useRef` + a single imperative requestAnimationFrame loop that writes
+ *  DIRECTLY to the DOM. React renders the static shell exactly once; `useState`
+ *  is reserved ONLY for the infrastructure-mode toggle (a rare, intentional
+ *  re-architecture). NEVER setState inside the rAF loop.
  *
- *   - The animated quantities (user count, SVG jitter, log throughput, colour
- *     thresholds) live entirely in `useRef` + an imperative requestAnimationFrame
- *     loop. We mutate `textContent`, `transform`, and `classList` DIRECTLY on
- *     DOM nodes. React renders the static shell exactly once.
+ *  WHAT CHANGED IN rev 3.0 (the performance + Awwwards pass)
+ *  ---------------------------------------------------------
+ *   1. THEME VIA CSS CUSTOM PROPERTIES, NOT CLASS SWAPS.
+ *      The old build flipped `.is-nominal | .is-warning | .is-critical` classes
+ *      on the wrapper. A class swap invalidates a huge selector-matching subtree
+ *      and snaps colours between 3 discrete steps. Instead we now interpolate
+ *      `--accent / --fg / --glow / --load / --collapse` every frame and push them
+ *      with `el.style.setProperty(...)`. The browser only re-resolves the handful
+ *      of declarations that *read* those vars — no selector re-match, no layout
+ *      thrash — and colour becomes a continuous, millisecond-fluid ramp.
  *
- *   - React state is reserved ONLY for things that genuinely re-architect the
- *     UI: the infrastructure mode toggle (STANDARD vs CUSTOM). That is a rare,
- *     intentional, user-driven change — cheap to reconcile.
+ *   2. STRICT READ-BEFORE-WRITE BATCHING.
+ *      `renderFrame()` is WRITE-ONLY: zero geometry reads, so it can never trip a
+ *      forced synchronous layout. The only `getBoundingClientRect()` in the whole
+ *      component lives in the pointer-move handler (event time, not frame time)
+ *      and writes nothing — it just stores a target the loop later consumes.
+ *      Per-property dedupe (`themeRef`) skips redundant writes when a value is
+ *      unchanged, so an idle/hover frame writes almost nothing.
  *
- *   - An IntersectionObserver puts the whole simulator into "sleep mode" when
- *     it scrolls out of view: the rAF loop is cancelled and no listeners fire,
- *     so an idle/off-screen section costs zero CPU.
+ *   3. GPU-ONLY MOTION.
+ *      Everything kinetic (button, SVG core, gauge fill, glow overlay) animates
+ *      via `translate3d` / `scaleX` / `opacity` on its own promoted layer
+ *      (`will-change`). We never touch top/left/width/height.
  *
- *   - All motion is expressed via `transform` and `opacity` ONLY (GPU-safe).
- *     We never animate top/left/width/height. `will-change: transform` is set
- *     only on the nodes that actually move.
+ *   4. ORGANIC SVG GLITCH FILTER.
+ *      The crude per-frame random-walk `translate` jitter is replaced by a real
+ *      SVG filter pipeline — `feTurbulence -> feDisplacementMap` for organic warp
+ *      plus a 3-way `feColorMatrix` channel split + `feOffset` for true RGB
+ *      chromatic aberration. The filter is gated OFF (zero cost) below the warn
+ *      band and its `scale` / offsets are driven live by the user count.
  *
- *   - The trigger uses unified Pointer Events with `touch-action: none` so a
- *     long-press on mobile injects traffic WITHOUT scrolling the page.
+ *   5. DECODE / SCRAMBLE TERMINAL, screen-blend "radioactive" glow, proportional
+ *      haptics, and a JS spring for the magnetic button — all driven from the one
+ *      rAF loop (see inline notes).
  *
- *  No external libraries (no GSAP, no Tailwind). A hand-rolled frame-rate
- *  independent interpolator stands in for GSAP's tweening.
+ *   6. SLEEP MODE. An IntersectionObserver (and a visibilitychange guard) cancels
+ *      the loop when the section is off-screen or the tab is hidden, so an idle
+ *      simulator costs zero CPU. No external libs (no GSAP, no Tailwind).
  * ============================================================================
  */
 
@@ -46,14 +66,52 @@ const WARN_THRESHOLD = 5000; // STANDARD: servers start to shudder
 const CRITICAL_THRESHOLD = 20000; // STANDARD: colour flips to error red, violent glitch
 
 // Exponential smoothing base (per ~16.67ms frame). Higher = snappier ramp.
-// We re-normalise it against real delta-time each frame so the curve looks
-// identical at 30fps, 60fps or 120fps.
+// Re-normalised against real delta-time each frame so the curve is identical
+// at 30/60/120fps.
 const SMOOTH_BASE = 0.055;
 
-// Throttle for terminal output so logs arrive in readable "bursts", not a
-// per-frame firehose.
+// Magnetic button: cursor pull strength + spring stiffness (per 16.67ms frame).
+const MAGNET_PULL = 0.22; // fraction of cursor offset the button chases
+const MAGNET_STIFF = 0.2; // lerp factor -> higher = snappier follow
+
+// Decode/scramble reveal duration per log line, and how many may decode at once.
+const DECODE_MS = 240;
+const MAX_ACTIVE_DECODES = 4;
+const SCRAMBLE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ0123456789#%&/<>*+=";
+
+// Throttle for terminal output so logs arrive in readable "bursts".
 const LOG_INTERVAL_MS = 110;
 const MAX_LOG_LINES = 14; // ring-buffer cap to keep the DOM tiny
+
+/* ---------------------------------------------------------------------------
+ * PALETTE (numeric RGB triplets so we can interpolate them per frame).
+ * ------------------------------------------------------------------------- */
+const C_CREAM = [240, 230, 211]; // #F0E6D3
+const C_ORANGE = [244, 162, 97]; // #F4A261
+const C_RED = [255, 59, 48]; // #FF3B30
+const C_GREEN = [74, 246, 38]; // #4AF626
+
+/* Pre-computed normalised load values (0..1) for the two STANDARD thresholds. */
+const WARN_LOAD = (WARN_THRESHOLD - USERS_MIN) / (USERS_MAX - USERS_MIN); // ~0.098
+const CRIT_LOAD = (CRITICAL_THRESHOLD - USERS_MIN) / (USERS_MAX - USERS_MIN); // ~0.399
+
+/* ---------------------------------------------------------------------------
+ * Tiny pure math/colour helpers (module scope so they're never re-allocated).
+ * ------------------------------------------------------------------------- */
+const lerp = (a, b, t) => a + (b - a) * t;
+const clamp01 = (x) => (x < 0 ? 0 : x > 1 ? 1 : x);
+const smoothstep = (e0, e1, x) => {
+  const t = clamp01((x - e0) / (e1 - e0 || 1));
+  return t * t * (3 - 2 * t);
+};
+const mixRGB = (c1, c2, t) => [
+  Math.round(lerp(c1[0], c2[0], t)),
+  Math.round(lerp(c1[1], c2[1], t)),
+  Math.round(lerp(c1[2], c2[2], t)),
+];
+const toRGB = (c) => "rgb(" + c[0] + "," + c[1] + "," + c[2] + ")";
+const toRGBA = (c, a) =>
+  "rgba(" + c[0] + "," + c[1] + "," + c[2] + "," + a.toFixed(3) + ")";
 
 /* ---------------------------------------------------------------------------
  * LOG VOCABULARIES — the strings the terminal "spits out" per mode/state.
@@ -88,24 +146,35 @@ const LOGS_CUSTOM_STABLE = [
 
 export default function StressTestSection() {
   /* ===========================================================================
-   * REACT STATE — intentionally minimal.
-   * `mode` is the ONLY value allowed to trigger a re-render. Everything that
-   * animates is held in refs below.
+   * REACT STATE — intentionally minimal. `mode` is the ONLY value allowed to
+   * trigger a re-render. Everything that animates is held in refs below.
    * ========================================================================= */
   const [mode, setMode] = useState("standard"); // "standard" | "custom"
+
+  /* A collision-proof id for the SVG filter (so multiple instances never clash).
+   * useId() yields e.g. ":r3:"; strip chars that are illegal in selectors/url(). */
+  const FILTER_ID = ("stsimGlitch" + useId()).replace(/[^a-zA-Z0-9_-]/g, "");
 
   /* ===========================================================================
    * DOM REFS — the imperative animation surface.
    * ========================================================================= */
   const sectionRef = useRef(null); // IntersectionObserver target / root
-  const panelRef = useRef(null); // receives state classes (warning/critical/custom)
+  const panelRef = useRef(null); // receives the live CSS theme variables
+  const radioRef = useRef(null); // screen-blend "radioactive" glow overlay
   const counterRef = useRef(null); // the giant monospace number node
   const labelRef = useRef(null); // the "[ SIMULTANEOUS_USERS: N ]" badge node
-  const svgWrapRef = useRef(null); // SVG container we jitter via transform
+  const svgWrapRef = useRef(null); // SVG container (transform: breathing / shake)
+  const svgRef = useRef(null); // the <svg> itself (CSS `filter` toggle target)
   const gaugeFillRef = useRef(null); // load-bar fill (scaleX)
   const buttonRef = useRef(null); // magnetic hold button
   const btnLabelRef = useRef(null); // button caption (text swaps on hold)
   const terminalRef = useRef(null); // log scroll container
+
+  /* Live SVG-filter primitives we mutate via setAttribute (resolved on mount). */
+  const turbRef = useRef(null); // <feTurbulence>     -> organic warp source
+  const dispRef = useRef(null); // <feDisplacementMap> -> warp amount (scale)
+  const rOffRef = useRef(null); // <feOffset> red channel  -> chromatic split +x
+  const bOffRef = useRef(null); // <feOffset> blue channel -> chromatic split -x
 
   /* ===========================================================================
    * MUTABLE SIMULATION STATE — refs so updates never re-render.
@@ -116,10 +185,19 @@ export default function StressTestSection() {
   const rafRef = useRef(null); // active animation frame id (or null)
   const lastTsRef = useRef(0); // timestamp of previous frame (for dt)
   const lastLogTsRef = useRef(0); // timestamp of last emitted log line
+  const lastHapticRef = useRef(0); // timestamp of last vibration pulse
   const isVisibleRef = useRef(true); // IntersectionObserver visibility flag
-  const stateClassRef = useRef(""); // last applied threshold class (dedupe)
+  const reducedRef = useRef(false); // prefers-reduced-motion snapshot
+  const filterOnRef = useRef(false); // is the SVG glitch filter currently applied?
   const collapsedRef = useRef(false); // STANDARD: latched "SYSTEM COLLAPSED" log
   const stableLoggedRef = useRef(false); // CUSTOM: latched "200 OK" log
+  const themeRef = useRef({}); // last-written CSS-var values (write dedupe)
+  const activeDecodesRef = useRef([]); // log nodes still resolving their scramble
+
+  /* Magnetic button physics (a JS spring instead of CSS cubic-beziers). */
+  const magnetTargetRef = useRef({ x: 0, y: 0 }); // where the cursor wants it
+  const magnetCurrentRef = useRef({ x: 0, y: 0 }); // where it actually is (lerped)
+  const magnetActiveRef = useRef(false); // pointer currently engaging the button?
 
   /* Keep the ref mirror of `mode` in sync so the rAF loop reads fresh values. */
   useEffect(() => {
@@ -128,7 +206,6 @@ export default function StressTestSection() {
 
   /* ---------------------------------------------------------------------------
    * formatUsers — thousands-separated integer, e.g. 50000 -> "50,000".
-   * Pure string work; no allocation-heavy Intl in the hot path.
    * ------------------------------------------------------------------------- */
   const formatUsers = (n) => {
     const v = Math.round(n);
@@ -136,9 +213,22 @@ export default function StressTestSection() {
   };
 
   /* ---------------------------------------------------------------------------
-   * pushLog — append a single line to the terminal as a real DOM node, then
-   * enforce the ring-buffer cap and pin scroll to the bottom. Operates outside
-   * React entirely.
+   * finalizeDecodes — snap every in-flight scramble to its final string. Called
+   * when we go to sleep so no line is ever frozen mid-decode off-screen.
+   * ------------------------------------------------------------------------- */
+  const finalizeDecodes = useCallback(() => {
+    const list = activeDecodesRef.current;
+    for (let i = 0; i < list.length; i++) {
+      const ln = list[i];
+      if (ln && ln._full != null) ln.textContent = ln._full;
+    }
+    list.length = 0;
+  }, []);
+
+  /* ---------------------------------------------------------------------------
+   * pushLog — append a single line to the terminal as a real DOM node. Instead
+   * of showing the text instantly we register it for a per-frame "decode"
+   * (random glyphs resolving into the final string). All outside React.
    * ------------------------------------------------------------------------- */
   const pushLog = useCallback((text, kind) => {
     const term = terminalRef.current;
@@ -147,197 +237,370 @@ export default function StressTestSection() {
     const line = document.createElement("div");
     line.className = "stsim__logline stsim__logline--" + kind;
 
-    // Prefix every line with a faux millisecond clock for telemetry flavour.
+    // Faux millisecond clock prefix for telemetry flavour.
     const clock = (performance.now() % 100000).toFixed(0).padStart(5, "0");
-    line.textContent = "[" + clock + "ms] " + text;
+    const prefix = "[" + clock + "ms] ";
+    const full = prefix + text;
+
+    if (reducedRef.current) {
+      // Reduced-motion: no scramble, just print it.
+      line.textContent = full;
+    } else {
+      // Stash decode metadata on the node and show the prefix immediately; the
+      // rAF loop reveals the message body character-by-character.
+      line._full = full;
+      line._from = prefix.length; // chars before this are shown verbatim
+      line._start = performance.now();
+      line.textContent = prefix;
+      const active = activeDecodesRef.current;
+      active.push(line);
+      // Cap concurrent decodes: finalise the oldest so we never build a backlog.
+      while (active.length > MAX_ACTIVE_DECODES) {
+        const old = active.shift();
+        if (old && old._full != null) old.textContent = old._full;
+      }
+    }
 
     term.appendChild(line);
 
-    // Ring-buffer: drop the oldest node(s) once we exceed the cap. Removing
-    // from the front keeps DOM size bounded => stable memory + layout cost.
+    // Ring-buffer: drop oldest node(s) past the cap -> bounded DOM = stable cost.
     while (term.childElementCount > MAX_LOG_LINES) {
       term.removeChild(term.firstElementChild);
     }
-    // Keep the newest line in view.
-    term.scrollTop = term.scrollHeight;
+    // Pin to bottom WITHOUT reading scrollHeight (that would force a layout):
+    // an over-large scrollTop is silently clamped to the max by the browser.
+    term.scrollTop = 1e6;
   }, []);
 
   /* ---------------------------------------------------------------------------
-   * applyStateClass — flip the panel's threshold class at most once per change.
-   * Drives all colour theming through CSS rather than per-frame style writes.
-   * ------------------------------------------------------------------------- */
-  const applyStateClass = useCallback((next) => {
-    if (stateClassRef.current === next) return; // dedupe: no redundant writes
-    const panel = panelRef.current;
-    if (!panel) return;
-    panel.classList.remove(
-      "is-nominal",
-      "is-warning",
-      "is-critical",
-      "is-custom-stable"
-    );
-    panel.classList.add(next);
-    stateClassRef.current = next;
-  }, []);
-
-  /* ---------------------------------------------------------------------------
-   * renderFrame — the single imperative paint. Called every rAF tick. Reads
-   * `usersRef` and writes directly to the DOM. NEVER calls setState.
+   * renderFrame — the single imperative paint. WRITE-ONLY (no geometry reads),
+   * so it can never trigger a forced synchronous layout. Receives `dt` (ms since
+   * last frame) for frame-rate-independent springs.
    * ------------------------------------------------------------------------- */
   const renderFrame = useCallback(
-    (now) => {
+    (now, dt) => {
       const users = usersRef.current;
       const isCustom = modeRef.current === "custom";
+      const load = clamp01((users - USERS_MIN) / (USERS_MAX - USERS_MIN));
+      const reduced = reducedRef.current;
+      const th = themeRef.current;
 
-      /* --- 1. The giant counter + telemetry badge --------------------------- */
-      if (counterRef.current) {
-        counterRef.current.textContent = formatUsers(users);
-      }
-      if (labelRef.current) {
-        labelRef.current.textContent =
-          "[ SIMULTANEOUS_USERS: " + formatUsers(users) + " ]";
-      }
+      /* ====================================================================
+       * A. THEME — interpolate colours from `load` and push them as CSS vars.
+       *    Continuous instead of 3 discrete class states; per-prop dedupe means
+       *    a steady frame writes nothing.
+       * ==================================================================== */
+      let accent, fg, collapse, glowA, coreFillA, radioOp;
 
-      /* --- 2. Load gauge (scaleX 0..1) — transform-only, GPU friendly ------- */
-      if (gaugeFillRef.current) {
-        const pct = (users - USERS_MIN) / (USERS_MAX - USERS_MIN); // 0..1
-        gaugeFillRef.current.style.transform = "scaleX(" + pct.toFixed(4) + ")";
-      }
-
-      /* --- 3. Threshold / colour state machine ------------------------------ */
       if (isCustom) {
-        // CUSTOM ARCHITECTURE: always healthy. Near saturation we latch the
-        // "stable" theme (full neon green glow). Below that it's nominal-custom.
-        applyStateClass("is-custom-stable");
+        // CUSTOM ARCHITECTURE: always healthy. Brilliant neon green, glow grows
+        // gently toward saturation; never collapses.
+        accent = C_GREEN;
+        fg = C_GREEN;
+        collapse = 0;
+        glowA = 0.2 + load * 0.55;
+        coreFillA = load * 0.2;
+        radioOp = load * 0.32;
       } else {
         // STANDARD TEMPLATE: degrade as load climbs.
-        if (users >= CRITICAL_THRESHOLD) applyStateClass("is-critical");
-        else if (users >= WARN_THRESHOLD) applyStateClass("is-warning");
-        else applyStateClass("is-nominal");
+        // accent: orange -> red across the warn..critical band.
+        const aT = smoothstep(WARN_LOAD, CRIT_LOAD, load);
+        accent = mixRGB(C_ORANGE, C_RED, aT);
+        // collapse: 0 at critical -> 1 at saturation (drives the violent stuff).
+        collapse = smoothstep(CRIT_LOAD, 1, load);
+        // fg: cream stays legible until we're well past critical, then bleeds red.
+        fg = mixRGB(C_CREAM, C_RED, smoothstep(CRIT_LOAD * 0.92, 1, load));
+        glowA = 0.15 + load * 0.5 + collapse * 0.3;
+        coreFillA = collapse * 0.18;
+        radioOp = collapse * 0.55;
       }
 
-      /* --- 4. SVG kinetic behaviour (transform-only jitter / pulse) --------- */
+      // Flicker the radioactive overlay only in the danger zone (and never under
+      // reduced-motion). A multiplicative jitter reads as an unstable neon tube.
+      if (!reduced && (collapse > 0.4 || (isCustom && load > 0.9))) {
+        radioOp *= 0.7 + Math.random() * 0.5;
+      }
+
+      const accentStr = toRGB(accent);
+      const fgStr = toRGB(fg);
+      const glowStr = toRGBA(accent, glowA);
+      const borderStr = toRGBA(accent, 0.1 + load * 0.45 + collapse * 0.2);
+      const coreStr = coreFillA > 0.001 ? toRGBA(accent, coreFillA) : "transparent";
+      const loadStr = load.toFixed(3);
+      const collapseStr = collapse.toFixed(3);
+      const radioStr = radioOp.toFixed(3);
+
+      const panel = panelRef.current;
+      if (panel) {
+        // Dedupe each property: only write when the resolved value actually moved.
+        if (th.accent !== accentStr) {
+          panel.style.setProperty("--accent", accentStr);
+          th.accent = accentStr;
+        }
+        if (th.fg !== fgStr) {
+          panel.style.setProperty("--fg", fgStr);
+          th.fg = fgStr;
+        }
+        if (th.glow !== glowStr) {
+          panel.style.setProperty("--glow", glowStr);
+          th.glow = glowStr;
+        }
+        if (th.border !== borderStr) {
+          panel.style.setProperty("--border", borderStr);
+          th.border = borderStr;
+        }
+        if (th.core !== coreStr) {
+          panel.style.setProperty("--core-fill", coreStr);
+          th.core = coreStr;
+        }
+        if (th.load !== loadStr) {
+          panel.style.setProperty("--load", loadStr);
+          th.load = loadStr;
+        }
+        if (th.collapse !== collapseStr) {
+          panel.style.setProperty("--collapse", collapseStr);
+          th.collapse = collapseStr;
+        }
+      }
+      if (radioRef.current && th.radio !== radioStr) {
+        radioRef.current.style.opacity = radioStr;
+        th.radio = radioStr;
+      }
+
+      /* ====================================================================
+       * B. COUNTER + telemetry badge (deduped so a steady value writes nothing).
+       * ==================================================================== */
+      const countStr = formatUsers(users);
+      if (th.count !== countStr) {
+        if (counterRef.current) counterRef.current.textContent = countStr;
+        if (labelRef.current) {
+          labelRef.current.textContent =
+            "[ SIMULTANEOUS_USERS: " + countStr + " ]";
+        }
+        th.count = countStr;
+      }
+
+      /* ====================================================================
+       * C. LOAD GAUGE (scaleX 0..1) — transform-only, GPU friendly, deduped.
+       * ==================================================================== */
+      if (gaugeFillRef.current) {
+        const gaugeStr = "scaleX(" + load.toFixed(4) + ")";
+        if (th.gauge !== gaugeStr) {
+          gaugeFillRef.current.style.transform = gaugeStr;
+          th.gauge = gaugeStr;
+        }
+      }
+
+      /* ====================================================================
+       * D. SVG GLITCH FILTER — organic displacement + RGB chromatic split.
+       *    Gated OFF entirely below the warn band (zero filter cost at rest).
+       * ==================================================================== */
+      const glitch = isCustom || reduced ? 0 : smoothstep(WARN_LOAD, 1, load);
+      if (glitch > 0.001) {
+        if (!filterOnRef.current && svgRef.current) {
+          svgRef.current.style.filter = "url(#" + FILTER_ID + ")";
+          filterOnRef.current = true;
+        }
+        // Warp magnitude: eased ramp + occasional violent spike past critical.
+        if (dispRef.current) {
+          let scale = glitch * glitch * 10;
+          if (collapse > 0 && Math.random() < 0.18) {
+            scale += Math.random() * collapse * 14;
+          }
+          dispRef.current.setAttribute("scale", Math.min(18, scale).toFixed(2));
+        }
+        // Chromatic aberration: push R and B channels apart, jitter at collapse.
+        if (rOffRef.current && bOffRef.current) {
+          const ca = glitch * 3.2 + (collapse > 0 ? (Math.random() - 0.5) * collapse * 5 : 0);
+          const cay = collapse > 0 ? (Math.random() - 0.5) * collapse * 3 : 0;
+          rOffRef.current.setAttribute("dx", ca.toFixed(2));
+          rOffRef.current.setAttribute("dy", cay.toFixed(2));
+          bOffRef.current.setAttribute("dx", (-ca).toFixed(2));
+          bOffRef.current.setAttribute("dy", (-cay * 0.6).toFixed(2));
+        }
+        // Slow-drifting turbulence so the warp lives & breathes instead of buzzing
+        // on a fixed pattern; frequency also tightens as load climbs.
+        if (turbRef.current) {
+          const fx = Math.max(0.001, 0.006 + glitch * 0.02 + Math.sin(now / 700) * 0.003);
+          const fy = Math.max(0.001, 0.02 + glitch * 0.05 + Math.cos(now / 900) * 0.006);
+          turbRef.current.setAttribute("baseFrequency", fx.toFixed(4) + " " + fy.toFixed(4));
+        }
+      } else if (filterOnRef.current && svgRef.current) {
+        svgRef.current.style.filter = "none";
+        filterOnRef.current = false;
+      }
+
+      /* ====================================================================
+       * E. SVG WRAP TRANSFORM — calm breathing (custom) or a small physical
+       *    shake at terminal collapse (the filter does the heavy glitch lifting).
+       * ==================================================================== */
       if (svgWrapRef.current) {
+        let scale = 1;
         let tx = 0;
         let ty = 0;
-        let rot = 0;
-        let scale = 1;
-
         if (isCustom) {
-          // Soft harmonic breathing pulse — sine-driven, sub-pixel, serene.
           const breathe = injectingRef.current ? 1 : 0.45;
           scale = 1 + Math.sin(now / 620) * 0.006 * breathe;
-        } else {
-          // Compute how far past each threshold we are => jitter magnitude.
-          if (users >= WARN_THRESHOLD) {
-            // Ramp 0..1 across the warning band, then keep growing into crit.
-            const warnSpan = CRITICAL_THRESHOLD - WARN_THRESHOLD;
-            const warnAmt = Math.min(1, (users - WARN_THRESHOLD) / warnSpan);
-            let amp = 1.5 + warnAmt * 3.5; // gentle shudder in the warn zone
-
-            if (users >= CRITICAL_THRESHOLD) {
-              // Violent collapse: amplitude scales with overshoot past crit.
-              const critSpan = USERS_MAX - CRITICAL_THRESHOLD;
-              const critAmt = Math.min(1, (users - CRITICAL_THRESHOLD) / critSpan);
-              amp = 6 + critAmt * 12; // up to ~18px of chaos
-              rot = (Math.random() - 0.5) * critAmt * 2.4; // glitch rotation
-            }
-            // Random walk each frame => raw mechanical vibration.
-            tx = (Math.random() - 0.5) * amp;
-            ty = (Math.random() - 0.5) * amp;
-          }
+        } else if (collapse > 0 && !reduced) {
+          const amp = collapse * 4; // small — physicality, not the main glitch
+          tx = (Math.random() - 0.5) * amp;
+          ty = (Math.random() - 0.5) * amp;
         }
-
-        // Single composited transform write (translate3d => own GPU layer).
-        svgWrapRef.current.style.transform =
-          "translate3d(" +
-          tx.toFixed(2) +
-          "px," +
-          ty.toFixed(2) +
-          "px,0) rotate(" +
-          rot.toFixed(3) +
-          "deg) scale(" +
-          scale.toFixed(4) +
-          ")";
+        const svgT =
+          "translate3d(" + tx.toFixed(2) + "px," + ty.toFixed(2) + "px,0) scale(" + scale.toFixed(4) + ")";
+        if (th.svgT !== svgT) {
+          svgWrapRef.current.style.transform = svgT;
+          th.svgT = svgT;
+        }
       }
 
-      /* --- 5. Terminal log emission (throttled) ----------------------------- */
+      /* ====================================================================
+       * F. MAGNETIC BUTTON — JS spring. Lerp current -> target every frame
+       *    (frame-rate independent) instead of leaning on a CSS transition.
+       * ==================================================================== */
+      if (buttonRef.current) {
+        const mt = magnetTargetRef.current;
+        const mc = magnetCurrentRef.current;
+        const sf = 1 - Math.pow(1 - MAGNET_STIFF, dt / 16.667);
+        mc.x += (mt.x - mc.x) * sf;
+        mc.y += (mt.y - mc.y) * sf;
+        // Settle to exact zero once we're home so the loop can fully stop.
+        if (!magnetActiveRef.current) {
+          if (Math.abs(mc.x) < 0.05) mc.x = 0;
+          if (Math.abs(mc.y) < 0.05) mc.y = 0;
+        }
+        // Press compression while held, straining harder under load/collapse.
+        let bScale = 1;
+        if (injectingRef.current) {
+          bScale = 0.97 - load * 0.03 - (collapse > 0 ? Math.random() * collapse * 0.02 : 0);
+        }
+        buttonRef.current.style.transform =
+          "translate3d(" + mc.x.toFixed(2) + "px," + mc.y.toFixed(2) + "px,0) scale(" + bScale.toFixed(3) + ")";
+      }
+
+      /* ====================================================================
+       * G. DECODE STEP — advance every in-flight scramble. Bounded work
+       *    (<= MAX_ACTIVE_DECODES short strings), all writes, no reads.
+       * ==================================================================== */
+      const decodes = activeDecodesRef.current;
+      if (decodes.length) {
+        for (let i = decodes.length - 1; i >= 0; i--) {
+          const ln = decodes[i];
+          if (!ln || !ln.isConnected) {
+            decodes.splice(i, 1); // node was ring-buffered out
+            continue;
+          }
+          const p = (now - ln._start) / DECODE_MS;
+          if (p >= 1) {
+            ln.textContent = ln._full;
+            decodes.splice(i, 1);
+            continue;
+          }
+          const full = ln._full;
+          const from = ln._from;
+          const len = full.length;
+          const reveal = from + Math.floor((len - from) * p);
+          let out = full.slice(0, reveal);
+          for (let c = reveal; c < len; c++) {
+            const ch = full[c];
+            out += ch === " " ? " " : SCRAMBLE_CHARS[(Math.random() * SCRAMBLE_CHARS.length) | 0];
+          }
+          ln.textContent = out;
+        }
+      }
+
+      /* ====================================================================
+       * H. HAPTICS — vibrate proportionally to load while the finger is down.
+       *    Interval shrinks + pulse lengthens with load => from light taps to a
+       *    near-continuous violent buzz at System Collapse. STANDARD escalates
+       *    hard; CUSTOM stays a gentle, capped confirmation tick.
+       * ==================================================================== */
+      if (
+        injectingRef.current &&
+        !reduced &&
+        load >= 0.08 &&
+        typeof navigator !== "undefined" &&
+        navigator.vibrate
+      ) {
+        const e = Math.pow(load, 1.4);
+        const interval = isCustom ? lerp(220, 90, e) : lerp(340, 26, e);
+        if (now - lastHapticRef.current >= interval) {
+          lastHapticRef.current = now;
+          const dur = Math.round(isCustom ? lerp(6, 12, e) : lerp(8, 42, e));
+          try {
+            navigator.vibrate(dur);
+          } catch {
+            /* vibration is best-effort */
+          }
+        }
+      }
+
+      /* ====================================================================
+       * I. TERMINAL LOG EMISSION (throttled).
+       * ==================================================================== */
       if (now - lastLogTsRef.current >= LOG_INTERVAL_MS) {
         lastLogTsRef.current = now;
-
         if (isCustom) {
           if (injectingRef.current && users < USERS_MAX - 50) {
-            pushLog(
-              LOGS_CUSTOM_RAMP[(Math.random() * LOGS_CUSTOM_RAMP.length) | 0],
-              "ok"
-            );
-          } else if (users >= USERS_MAX - 50) {
-            // Latch a couple of definitive "all good" lines at saturation.
-            if (!stableLoggedRef.current) {
-              stableLoggedRef.current = true;
-              LOGS_CUSTOM_STABLE.forEach((l) => pushLog(l, "ok"));
-            }
+            pushLog(LOGS_CUSTOM_RAMP[(Math.random() * LOGS_CUSTOM_RAMP.length) | 0], "ok");
+          } else if (users >= USERS_MAX - 50 && !stableLoggedRef.current) {
+            stableLoggedRef.current = true;
+            LOGS_CUSTOM_STABLE.forEach((l) => pushLog(l, "ok"));
           }
-        } else {
-          if (users >= CRITICAL_THRESHOLD) {
-            pushLog(
-              LOGS_STANDARD_CRITICAL[
-                (Math.random() * LOGS_STANDARD_CRITICAL.length) | 0
-              ],
-              "err"
-            );
-            // Latch the final collapse line once we hit saturation.
-            if (users >= USERS_MAX - 50 && !collapsedRef.current) {
-              collapsedRef.current = true;
-              pushLog(">>> SYSTEM COLLAPSED // 0x000000DEAD", "err");
-            }
-          } else if (users >= WARN_THRESHOLD) {
-            pushLog(
-              LOGS_STANDARD_WARN[(Math.random() * LOGS_STANDARD_WARN.length) | 0],
-              "warn"
-            );
+        } else if (users >= CRITICAL_THRESHOLD) {
+          pushLog(LOGS_STANDARD_CRITICAL[(Math.random() * LOGS_STANDARD_CRITICAL.length) | 0], "err");
+          if (users >= USERS_MAX - 50 && !collapsedRef.current) {
+            collapsedRef.current = true;
+            pushLog(">>> SYSTEM COLLAPSED // 0x000000DEAD", "err");
           }
+        } else if (users >= WARN_THRESHOLD) {
+          pushLog(LOGS_STANDARD_WARN[(Math.random() * LOGS_STANDARD_WARN.length) | 0], "warn");
         }
       }
     },
-    [applyStateClass, pushLog]
+    [pushLog, FILTER_ID]
   );
+
+  /* A ref that always points at the latest `tick`, so the rAF loop can
+   * re-schedule itself without a const referencing its own initializer. */
+  const tickRef = useRef(null);
 
   /* ---------------------------------------------------------------------------
    * tick — the rAF driver. Frame-rate independent exponential interpolation
-   * toward the active target (MAX while held, MIN on release). Self-cancels
-   * when idle or off-screen so we never burn cycles needlessly.
+   * toward the active target (MAX while held, MIN on release). Self-cancels only
+   * once EVERYTHING is settled: counter at baseline, magnet home, no decodes.
    * ------------------------------------------------------------------------- */
   const tick = useCallback(
     (now) => {
       rafRef.current = null;
+      if (!isVisibleRef.current) return; // SLEEP MODE (off-screen / tab hidden)
 
-      // SLEEP MODE: if scrolled out of view, freeze. The IntersectionObserver
-      // will restart the loop when the section returns.
-      if (!isVisibleRef.current) return;
-
-      // Delta-time in ms, clamped to avoid huge jumps after a tab-switch stall.
+      // Delta-time, clamped to avoid huge jumps after a tab-switch stall.
       const dt = Math.min(now - (lastTsRef.current || now), 64);
       lastTsRef.current = now;
 
-      // Normalise the smoothing factor to real elapsed time so the easing
-      // looks identical regardless of refresh rate.
+      // Normalise smoothing to real elapsed time -> identical easing at any fps.
       const factor = 1 - Math.pow(1 - SMOOTH_BASE, dt / 16.667);
-
       const target = injectingRef.current ? USERS_MAX : USERS_MIN;
       usersRef.current += (target - usersRef.current) * factor;
-
-      // Snap when within 1 user of target to settle cleanly.
       if (Math.abs(target - usersRef.current) < 1) usersRef.current = target;
 
-      renderFrame(now);
+      renderFrame(now, dt);
 
-      // Continue while holding, or while still decaying back to baseline.
-      const settled = !injectingRef.current && usersRef.current <= USERS_MIN + 0.5;
+      // Keep running while there's ANY live work to do.
+      const mc = magnetCurrentRef.current;
+      const magnetHome =
+        !magnetActiveRef.current && Math.abs(mc.x) < 0.1 && Math.abs(mc.y) < 0.1;
+      const settled =
+        !injectingRef.current &&
+        usersRef.current <= USERS_MIN + 0.5 &&
+        magnetHome &&
+        activeDecodesRef.current.length === 0;
+
       if (!settled) {
-        rafRef.current = requestAnimationFrame(tick);
+        rafRef.current = requestAnimationFrame(tickRef.current);
       } else {
-        // Fully reset transient latches once we're back at idle baseline.
+        // Back to full idle: reset transient latches.
         lastTsRef.current = 0;
         collapsedRef.current = false;
         stableLoggedRef.current = false;
@@ -346,37 +609,46 @@ export default function StressTestSection() {
     [renderFrame]
   );
 
+  /* Keep the self-scheduling ref pointed at the latest tick. */
+  useEffect(() => {
+    tickRef.current = tick;
+  }, [tick]);
+
   /* ---------------------------------------------------------------------------
    * startLoop — kick the rAF loop if it isn't already running and we're visible.
-   * Guarded so multiple pointer events can't stack duplicate loops.
    * ------------------------------------------------------------------------- */
   const startLoop = useCallback(() => {
     if (rafRef.current == null && isVisibleRef.current) {
       lastTsRef.current = 0; // fresh dt baseline
-      rafRef.current = requestAnimationFrame(tick);
+      rafRef.current = requestAnimationFrame(tickRef.current || tick);
     }
   }, [tick]);
 
   /* ===========================================================================
    * POINTER HANDLERS — unified for mouse / touch / pen via Pointer Events.
-   * `touch-action: none` (CSS) + pointer capture stops mobile scroll-stealing
-   * while the user holds the trigger.
    * ========================================================================= */
   const handleHoldStart = useCallback(
     (e) => {
       e.preventDefault(); // block text-selection / native long-press menus
-      // Capture the pointer so we still receive the "up" even if the finger
-      // drifts off the button edge.
       try {
         buttonRef.current?.setPointerCapture?.(e.pointerId);
-      } catch (_) {
+      } catch {
         /* pointer capture is best-effort */
       }
       injectingRef.current = true;
+      magnetActiveRef.current = true;
       if (btnLabelRef.current) {
         btnLabelRef.current.textContent = "[ INJECTING... RELEASE TO ABORT ]";
       }
       buttonRef.current?.classList.add("is-holding");
+      // A short confirmation tap the instant the press registers.
+      if (!reducedRef.current && typeof navigator !== "undefined" && navigator.vibrate) {
+        try {
+          navigator.vibrate(12);
+        } catch {
+          /* ignore */
+        }
+      }
       startLoop();
     },
     [startLoop]
@@ -389,69 +661,97 @@ export default function StressTestSection() {
         if (e && buttonRef.current?.hasPointerCapture?.(e.pointerId)) {
           buttonRef.current.releasePointerCapture(e.pointerId);
         }
-      } catch (_) {
+      } catch {
         /* ignore */
       }
       injectingRef.current = false;
+      magnetActiveRef.current = false;
+      magnetTargetRef.current.x = 0; // let the spring glide it home
+      magnetTargetRef.current.y = 0;
       if (btnLabelRef.current) {
         btnLabelRef.current.textContent = "[ HOLD TO INJECT TRAFFIC ]";
       }
       buttonRef.current?.classList.remove("is-holding");
-      // Reset magnetic offset so the button glides home.
-      if (buttonRef.current) buttonRef.current.style.transform = "";
-      startLoop(); // ensure the decay-to-baseline animation runs
+      // Cancel any ongoing vibration.
+      if (typeof navigator !== "undefined" && navigator.vibrate) {
+        try {
+          navigator.vibrate(0);
+        } catch {
+          /* ignore */
+        }
+      }
+      startLoop(); // ensure the decay-to-baseline + spring-home animation runs
     },
     [startLoop]
   );
 
   /* ---------------------------------------------------------------------------
-   * handleMagnet — subtle magnetic pull toward the cursor while hovering.
-   * Pure transform write; skipped entirely on coarse pointers (touch) where it
-   * has no meaning and could fight the scroll.
+   * handleMagnet — the ONLY geometry read in the component. Runs on pointer-move
+   * (event time, not frame time) and WRITES NOTHING: it recovers the button's
+   * untransformed centre (rect minus the transform we already applied) and
+   * stores a spring target the rAF loop consumes. Skipped on coarse pointers.
    * ------------------------------------------------------------------------- */
-  const handleMagnet = useCallback((e) => {
-    if (e.pointerType === "touch") return;
-    const btn = buttonRef.current;
-    if (!btn) return;
-    const r = btn.getBoundingClientRect();
-    const mx = e.clientX - (r.left + r.width / 2);
-    const my = e.clientY - (r.top + r.height / 2);
-    // Dampen the pull to ~22% of cursor offset for a magnetic, not jumpy, feel.
-    const press = btn.classList.contains("is-holding") ? 0.97 : 1;
-    btn.style.transform =
-      "translate(" +
-      (mx * 0.22).toFixed(2) +
-      "px," +
-      (my * 0.22).toFixed(2) +
-      "px) scale(" +
-      press +
-      ")";
-  }, []);
+  const handleMagnet = useCallback(
+    (e) => {
+      if (e.pointerType === "touch") return;
+      const btn = buttonRef.current;
+      if (!btn) return;
+      const r = btn.getBoundingClientRect(); // <-- single batched READ
+      const mc = magnetCurrentRef.current;
+      const baseX = r.left + r.width / 2 - mc.x; // undo current translate
+      const baseY = r.top + r.height / 2 - mc.y;
+      magnetTargetRef.current.x = (e.clientX - baseX) * MAGNET_PULL;
+      magnetTargetRef.current.y = (e.clientY - baseY) * MAGNET_PULL;
+      magnetActiveRef.current = true;
+      startLoop();
+    },
+    [startLoop]
+  );
+
+  const handleMagnetEnter = useCallback(
+    (e) => {
+      if (e.pointerType === "touch") return;
+      magnetActiveRef.current = true;
+      startLoop();
+    },
+    [startLoop]
+  );
 
   const handleMagnetLeave = useCallback(() => {
     const btn = buttonRef.current;
-    // Don't snap home mid-hold (pointercapture keeps the press alive).
-    if (btn && !btn.classList.contains("is-holding")) btn.style.transform = "";
-  }, []);
+    // Don't release mid-hold (pointer capture keeps the press alive).
+    if (btn && !btn.classList.contains("is-holding")) {
+      magnetActiveRef.current = false;
+      magnetTargetRef.current.x = 0;
+      magnetTargetRef.current.y = 0;
+      startLoop(); // spring back home, then settle
+    }
+  }, [startLoop]);
 
   /* ===========================================================================
-   * MODE TOGGLE — the one genuine state transition. Resets the whole sim so
-   * each architecture is tested from a clean baseline.
+   * MODE TOGGLE — the one genuine state transition. Resets the whole sim so each
+   * architecture is tested from a clean baseline.
    * ========================================================================= */
   const selectMode = useCallback(
     (next) => {
       if (next === modeRef.current) return;
-      // Abort any in-flight hold.
       injectingRef.current = false;
-      setMode(next); // triggers the single allowed re-render
+      setMode(next); // the single allowed re-render
 
       // Imperatively reset the simulation surface.
       usersRef.current = USERS_MIN;
       collapsedRef.current = false;
       stableLoggedRef.current = false;
-      stateClassRef.current = ""; // force re-apply next frame
+      themeRef.current = {}; // force every CSS var to re-write next frame
+      finalizeDecodes();
       if (terminalRef.current) terminalRef.current.innerHTML = "";
       if (svgWrapRef.current) svgWrapRef.current.style.transform = "";
+      if (svgRef.current) svgRef.current.style.filter = "none";
+      filterOnRef.current = false;
+      magnetTargetRef.current = { x: 0, y: 0 };
+      magnetCurrentRef.current = { x: 0, y: 0 };
+      if (buttonRef.current) buttonRef.current.style.transform = "";
+      if (radioRef.current) radioRef.current.style.opacity = "0";
       if (counterRef.current) counterRef.current.textContent = formatUsers(USERS_MIN);
       if (labelRef.current) {
         labelRef.current.textContent =
@@ -459,29 +759,39 @@ export default function StressTestSection() {
       }
       if (gaugeFillRef.current) gaugeFillRef.current.style.transform = "scaleX(0)";
 
-      // Seed an intro log so the terminal isn't empty after a reset.
       pushLog(
         next === "custom"
           ? "BOOT  >> mounting CUSTOM PYTHON+REACT ARCHITECTURE :: standby"
           : "BOOT  >> mounting STANDARD TEMPLATE (shared host) :: standby",
         next === "custom" ? "ok" : "warn"
       );
-      // Paint one frame so colours/gauge settle immediately.
       startLoop();
     },
-    [pushLog, startLoop]
+    [pushLog, startLoop, finalizeDecodes]
   );
 
   /* ===========================================================================
-   * MOUNT EFFECT — IntersectionObserver (sleep mode) + initial paint + the
-   * mandatory teardown that cancels rAF and disconnects observers.
+   * MOUNT EFFECT — resolve filter primitives, IntersectionObserver (sleep mode),
+   * reduced-motion snapshot, initial paint + mandatory teardown.
    * ========================================================================= */
   useEffect(() => {
     const el = sectionRef.current;
 
-    // Initial paint of the idle baseline so the panel isn't blank pre-interaction.
+    // Snapshot the motion preference once.
+    if (typeof window !== "undefined" && window.matchMedia) {
+      reducedRef.current = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    }
+
+    // Resolve the live SVG-filter primitive nodes by id (set in the markup).
+    if (el) {
+      turbRef.current = el.querySelector("#" + FILTER_ID + "-turb");
+      dispRef.current = el.querySelector("#" + FILTER_ID + "-disp");
+      rOffRef.current = el.querySelector("#" + FILTER_ID + "-r");
+      bOffRef.current = el.querySelector("#" + FILTER_ID + "-b");
+    }
+
+    // Initial paint of the idle baseline so the panel isn't blank.
     if (counterRef.current) counterRef.current.textContent = formatUsers(USERS_MIN);
-    applyStateClass("is-nominal");
     pushLog("SYS   >> diagnostic console ready :: awaiting operator", "warn");
 
     let observer = null;
@@ -491,14 +801,20 @@ export default function StressTestSection() {
           const entry = entries[0];
           isVisibleRef.current = entry.isIntersecting;
           if (entry.isIntersecting) {
-            // Returned to view: resume the loop only if there's work to do.
-            if (injectingRef.current || usersRef.current > USERS_MIN + 0.5) {
+            // Resume only if there's actual work pending.
+            if (
+              injectingRef.current ||
+              usersRef.current > USERS_MIN + 0.5 ||
+              magnetActiveRef.current ||
+              activeDecodesRef.current.length > 0
+            ) {
               startLoop();
             }
           } else if (rafRef.current != null) {
-            // Left view: hard-freeze. No frames, no work.
+            // Left view: hard-freeze, and don't leave any line mid-scramble.
             cancelAnimationFrame(rafRef.current);
             rafRef.current = null;
+            finalizeDecodes();
           }
         },
         { threshold: 0.15 }
@@ -506,20 +822,26 @@ export default function StressTestSection() {
       observer.observe(el);
     }
 
-    // Pause when the browser tab is hidden as well (belt-and-suspenders).
+    // Pause when the browser tab is hidden as well.
     const onVisibility = () => {
       if (document.hidden && rafRef.current != null) {
         cancelAnimationFrame(rafRef.current);
         rafRef.current = null;
+        finalizeDecodes();
       } else if (
         !document.hidden &&
         isVisibleRef.current &&
-        (injectingRef.current || usersRef.current > USERS_MIN + 0.5)
+        (injectingRef.current ||
+          usersRef.current > USERS_MIN + 0.5 ||
+          activeDecodesRef.current.length > 0)
       ) {
         startLoop();
       }
     };
     document.addEventListener("visibilitychange", onVisibility);
+
+    // Play the intro decode (runs a few frames, then self-settles).
+    startLoop();
 
     // --- TEARDOWN -----------------------------------------------------------
     return () => {
@@ -527,6 +849,13 @@ export default function StressTestSection() {
       rafRef.current = null;
       if (observer) observer.disconnect();
       document.removeEventListener("visibilitychange", onVisibility);
+      if (typeof navigator !== "undefined" && navigator.vibrate) {
+        try {
+          navigator.vibrate(0);
+        } catch {
+          /* ignore */
+        }
+      }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -560,8 +889,7 @@ export default function StressTestSection() {
             role="tab"
             aria-selected={mode === "standard"}
             className={
-              "stsim__opt stsim__opt--a" +
-              (mode === "standard" ? " is-active" : "")
+              "stsim__opt stsim__opt--a" + (mode === "standard" ? " is-active" : "")
             }
             onClick={() => selectMode("standard")}
           >
@@ -573,8 +901,7 @@ export default function StressTestSection() {
             role="tab"
             aria-selected={mode === "custom"}
             className={
-              "stsim__opt stsim__opt--b" +
-              (mode === "custom" ? " is-active" : "")
+              "stsim__opt stsim__opt--b" + (mode === "custom" ? " is-active" : "")
             }
             onClick={() => selectMode("custom")}
           >
@@ -588,7 +915,7 @@ export default function StressTestSection() {
           <div className="stsim__svgCell">
             <span className="stsim__cellTag">[ SERVER_CORE // CLUSTER_VIEW ]</span>
             <div ref={svgWrapRef} className="stsim__svgWrap">
-              <ServerDiagram />
+              <ServerDiagram filterId={FILTER_ID} svgRef={svgRef} />
             </div>
           </div>
 
@@ -617,14 +944,13 @@ export default function StressTestSection() {
             ref={buttonRef}
             type="button"
             className="stsim__trigger"
-            // Unified pointer events cover mouse + touch + pen.
             onPointerDown={handleHoldStart}
             onPointerUp={handleHoldEnd}
             onPointerCancel={handleHoldEnd}
+            onPointerEnter={handleMagnetEnter}
             onPointerLeave={handleMagnetLeave}
             onPointerMove={handleMagnet}
-            // Also bind raw touch handlers as a hard guarantee against scroll
-            // hijack on stubborn mobile browsers (preventDefault on touchstart).
+            // Hard guarantee against scroll hijack on stubborn mobile browsers.
             onTouchStart={(e) => e.preventDefault()}
             aria-label="Hold to inject traffic"
           >
@@ -632,7 +958,6 @@ export default function StressTestSection() {
               <span ref={btnLabelRef} className="stsim__triggerLabel">
                 [ HOLD TO INJECT TRAFFIC ]
               </span>
-              {/* Button-in-button trailing glyph in its own circular wrapper. */}
               <span className="stsim__triggerIcon" aria-hidden="true">
                 <svg viewBox="0 0 24 24" width="14" height="14">
                   <path
@@ -667,6 +992,9 @@ export default function StressTestSection() {
             aria-live="off"
           />
         </div>
+
+        {/* Screen-blend "radioactive" glow overlay — opacity driven per frame. */}
+        <div ref={radioRef} className="stsim__radio" aria-hidden="true" />
       </div>
     </section>
   );
@@ -674,19 +1002,85 @@ export default function StressTestSection() {
 
 /* ===========================================================================
  * ServerDiagram — minimal 1px vector cluster: a central core node linked to
- * four rack modules. Pure stroke geometry (no fills, no radii) to match the
- * Swiss-brutalist blueprint aesthetic. Colours inherit `currentColor` so the
- * panel's threshold classes recolour the entire diagram for free.
+ * four rack modules. Pure stroke geometry (no fills, no radii). Colours inherit
+ * `currentColor` so the live theme recolours the entire diagram for free.
+ *
+ * The <defs> carry the glitch filter:
+ *   feTurbulence -> feDisplacementMap   : organic warp (scale driven by JS)
+ *   feColorMatrix x3 + feOffset + feBlend(screen) : RGB chromatic aberration
  * ========================================================================= */
-function ServerDiagram() {
+function ServerDiagram({ filterId, svgRef }) {
   return (
     <svg
+      ref={svgRef}
       className="stsim__svg"
       viewBox="0 0 360 220"
       width="100%"
       role="img"
       aria-label="Server cluster diagram"
     >
+      <defs>
+        <filter
+          id={filterId}
+          x="-30%"
+          y="-30%"
+          width="160%"
+          height="160%"
+          colorInterpolationFilters="sRGB"
+        >
+          {/* organic noise field that drives the displacement */}
+          <feTurbulence
+            id={filterId + "-turb"}
+            type="fractalNoise"
+            baseFrequency="0.001 0.001"
+            numOctaves="2"
+            seed="7"
+            stitchTiles="stitch"
+            result="turb"
+          />
+          {/* warp the artwork by the noise; `scale` is animated live (0 = off) */}
+          <feDisplacementMap
+            id={filterId + "-disp"}
+            in="SourceGraphic"
+            in2="turb"
+            scale="0"
+            xChannelSelector="R"
+            yChannelSelector="G"
+            result="src"
+          />
+
+          {/* isolate the RED channel and shove it +x */}
+          <feColorMatrix
+            in="src"
+            type="matrix"
+            values="1 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 1 0"
+            result="redCh"
+          />
+          <feOffset id={filterId + "-r"} in="redCh" dx="0" dy="0" result="redOff" />
+
+          {/* isolate the BLUE channel and shove it -x */}
+          <feColorMatrix
+            in="src"
+            type="matrix"
+            values="0 0 0 0 0  0 0 0 0 0  0 0 1 0 0  0 0 0 1 0"
+            result="blueCh"
+          />
+          <feOffset id={filterId + "-b"} in="blueCh" dx="0" dy="0" result="blueOff" />
+
+          {/* keep the GREEN channel anchored */}
+          <feColorMatrix
+            in="src"
+            type="matrix"
+            values="0 0 0 0 0  0 1 0 0 0  0 0 0 0 0  0 0 0 1 0"
+            result="greenCh"
+          />
+
+          {/* screen-recombine the three offset channels -> chromatic fringe */}
+          <feBlend in="redOff" in2="greenCh" mode="screen" result="rg" />
+          <feBlend in="rg" in2="blueOff" mode="screen" />
+        </filter>
+      </defs>
+
       {/* connective bus lines (core <-> racks) */}
       <g
         className="stsim__svgLines"
@@ -765,8 +1159,16 @@ function ServerRack({ x, y }) {
 
 /* ===========================================================================
  * COMPONENT CSS — fully self-contained, no Tailwind / external utilities.
- * Threshold theming is driven by `.is-nominal | .is-warning | .is-critical |
- * .is-custom-stable` classes toggled imperatively on `.stsim__panel`.
+ * THEMING IS DRIVEN ENTIRELY BY LIVE CSS VARIABLES set per-frame from JS:
+ *   --accent  current accent colour (orange -> red, or green)
+ *   --fg      foreground/text colour
+ *   --glow    accent colour with a load-scaled alpha (for shadows/glows)
+ *   --border  panel border colour
+ *   --load    0..1 overall load            (drives glow blur/spread)
+ *   --collapse 0..1 past-critical severity (drives inset glow + radio overlay)
+ *   --core-fill core-node fill tint
+ * No threshold CLASSES are toggled at runtime anymore -> no selector re-match,
+ * no layout thrash, and colour is a continuous millisecond ramp.
  * ========================================================================= */
 const STRESS_TEST_CSS = `
 
@@ -780,16 +1182,11 @@ const STRESS_TEST_CSS = `
   --green:     #4AF626;
   --red:       #FF3B30;
 
-  /* live theme tokens — recoloured by the state classes below */
-  --fg: var(--cream);
-  --accent: var(--orange);
-  --glow: rgba(244,162,97,0.0);
-
   position: relative;
   box-sizing: border-box;
   width: 100%;
   background: var(--bg);
-  color: var(--fg);
+  color: var(--cream);
   font-family: 'Space Grotesk', system-ui, sans-serif;
   padding: clamp(48px, 7vw, 120px) clamp(16px, 4vw, 64px);
   /* faint blueprint grid backdrop */
@@ -800,21 +1197,36 @@ const STRESS_TEST_CSS = `
 }
 .stsim *, .stsim *::before, .stsim *::after { box-sizing: border-box; }
 
-/* outer 1px enclosure */
+/* outer 1px enclosure — all theming flows through these live vars */
 .stsim__panel {
   position: relative;
   max-width: 1180px;
   margin: 0 auto;
-  border: 1px solid var(--grid-soft);
+  overflow: hidden;
+
+  /* live theme tokens (JS overwrites these every frame) */
+  --load: 0;
+  --collapse: 0;
+  --accent: var(--orange);
+  --fg: var(--cream);
+  --glow: rgba(244,162,97,0);
+  --border: rgba(240,230,211,0.10);
+  --core-fill: transparent;
+
+  border: 1px solid var(--border);
   background: rgba(3,2,1,0.6);
-  transition: box-shadow 600ms cubic-bezier(0.32,0.72,0,1),
-              border-color 600ms cubic-bezier(0.32,0.72,0,1);
+  /* glow is pure JS-driven; no CSS transition (it would fight the per-frame writes) */
+  box-shadow:
+    0 0 calc(90px * var(--load)) -22px var(--glow),
+    inset 0 0 calc(70px * var(--collapse)) -28px var(--glow);
 }
 
 /* ---------- header ---------- */
 .stsim__head {
+  position: relative;
+  z-index: 1;
   padding: clamp(20px, 3vw, 40px);
-  border-bottom: 1px solid var(--grid-soft);
+  border-bottom: 1px solid var(--border);
 }
 .stsim__eyebrow {
   display: inline-block;
@@ -830,23 +1242,23 @@ const STRESS_TEST_CSS = `
   font-weight: 700;
   line-height: 0.92;
   letter-spacing: -0.03em;
-  text-transform: none;
   font-size: clamp(2.6rem, 8vw, 6.5rem);
   color: var(--fg);
-  transition: color 500ms cubic-bezier(0.32,0.72,0,1);
 }
 
 /* ---------- toggle (asymmetric) ---------- */
 .stsim__toggle {
+  position: relative;
+  z-index: 1;
   display: grid;
   grid-template-columns: 1fr 1.6fr; /* asymmetric weighting */
-  border-bottom: 1px solid var(--grid-soft);
+  border-bottom: 1px solid var(--border);
 }
 .stsim__opt {
   appearance: none;
   background: transparent;
   border: 0;
-  border-right: 1px solid var(--grid-soft);
+  border-right: 1px solid var(--border);
   color: var(--cream);
   text-align: left;
   padding: clamp(16px, 2.2vw, 26px);
@@ -865,11 +1277,7 @@ const STRESS_TEST_CSS = `
 .stsim__opt.is-active { opacity: 1; background: rgba(240,230,211,0.05); }
 .stsim__opt--a.is-active { box-shadow: inset 3px 0 0 var(--orange); color: var(--orange); }
 .stsim__opt--b.is-active { box-shadow: inset 3px 0 0 var(--green); color: var(--green); }
-.stsim__optTag {
-  font-size: 10px;
-  letter-spacing: 0.24em;
-  opacity: 0.7;
-}
+.stsim__optTag { font-size: 10px; letter-spacing: 0.24em; opacity: 0.7; }
 .stsim__optName {
   font-size: clamp(0.85rem, 1.4vw, 1.05rem);
   font-weight: 700;
@@ -878,14 +1286,16 @@ const STRESS_TEST_CSS = `
 
 /* ---------- server core ---------- */
 .stsim__core {
+  position: relative;
+  z-index: 1;
   display: grid;
   grid-template-columns: 1.1fr 1fr;
-  border-bottom: 1px solid var(--grid-soft);
+  border-bottom: 1px solid var(--border);
 }
 .stsim__svgCell {
   position: relative;
   padding: clamp(20px, 3vw, 48px);
-  border-right: 1px solid var(--grid-soft);
+  border-right: 1px solid var(--border);
   min-height: 280px;
   display: flex;
   align-items: center;
@@ -903,11 +1313,16 @@ const STRESS_TEST_CSS = `
 .stsim__svgWrap {
   width: 100%;
   max-width: 460px;
-  will-change: transform; /* promote to its own GPU layer for jitter */
+  will-change: transform;   /* own GPU layer for breathing / shake */
   transform: translateZ(0);
 }
-.stsim__svg { display: block; color: var(--fg); transition: color 400ms cubic-bezier(0.32,0.72,0,1); }
-.stsim__svgCoreNode circle { transition: fill 400ms ease; }
+.stsim__svg {
+  display: block;
+  overflow: visible;        /* let the displacement filter bleed past the box */
+  color: var(--fg);
+  will-change: filter;
+}
+.stsim__svgCoreNode circle { fill: var(--core-fill); }
 
 /* readout column */
 .stsim__readout {
@@ -927,13 +1342,15 @@ const STRESS_TEST_CSS = `
   font-size: clamp(3.2rem, 11vw, 8rem);
   color: var(--fg);
   font-variant-numeric: tabular-nums;
-  transition: color 350ms cubic-bezier(0.32,0.72,0,1),
-              text-shadow 350ms cubic-bezier(0.32,0.72,0,1);
+  /* neon glow scales with load, blooming "radioactive" at collapse */
+  text-shadow:
+    0 0 calc(22px * var(--load)) var(--glow),
+    0 0 calc(64px * var(--collapse)) var(--glow);
 }
 /* 1px-framed load gauge */
 .stsim__gauge {
   height: 14px;
-  border: 1px solid var(--grid-soft);
+  border: 1px solid var(--border);
   background: rgba(240,230,211,0.02);
   overflow: hidden;
 }
@@ -944,7 +1361,7 @@ const STRESS_TEST_CSS = `
   transform-origin: left center;
   background: var(--accent);
   will-change: transform;
-  transition: background 350ms cubic-bezier(0.32,0.72,0,1);
+  box-shadow: 0 0 calc(18px * var(--load)) var(--glow);
 }
 .stsim__gaugeScale {
   display: flex;
@@ -957,11 +1374,13 @@ const STRESS_TEST_CSS = `
 
 /* ---------- trigger ---------- */
 .stsim__triggerRow {
+  position: relative;
+  z-index: 1;
   display: flex;
   align-items: center;
   gap: clamp(16px, 3vw, 40px);
   padding: clamp(28px, 4vw, 56px) clamp(20px, 3vw, 48px);
-  border-bottom: 1px solid var(--grid-soft);
+  border-bottom: 1px solid var(--border);
   flex-wrap: wrap;
 }
 .stsim__trigger {
@@ -972,22 +1391,21 @@ const STRESS_TEST_CSS = `
   padding: 0;
   cursor: pointer;
   border-radius: 999px;
-  /* CRITICAL: isolate touch so a long-press never scrolls the page. */
-  touch-action: none;
+  touch-action: none;       /* a long-press never scrolls the page */
   -webkit-user-select: none;
   user-select: none;
   -webkit-tap-highlight-color: transparent;
   will-change: transform;
-  transition: transform 350ms cubic-bezier(0.32,0.72,0,1),
-              border-color 350ms cubic-bezier(0.32,0.72,0,1),
-              box-shadow 350ms cubic-bezier(0.32,0.72,0,1),
-              background 350ms cubic-bezier(0.32,0.72,0,1);
+  /* NOTE: transform is JS-spring-driven; only non-transform props transition. */
+  transition: box-shadow 350ms cubic-bezier(0.32,0.72,0,1),
+              border-color 200ms linear,
+              background 200ms linear;
 }
 .stsim__trigger:hover { box-shadow: 0 0 0 6px rgba(240,230,211,0.03); }
 .stsim__trigger.is-holding {
   background: var(--accent);
   color: var(--bg);
-  box-shadow: 0 0 40px -4px var(--glow);
+  box-shadow: 0 0 48px -4px var(--glow);
 }
 .stsim__triggerInner {
   display: inline-flex;
@@ -1000,7 +1418,6 @@ const STRESS_TEST_CSS = `
   font-weight: 500;
 }
 .stsim__triggerLabel { white-space: nowrap; }
-/* button-in-button trailing icon */
 .stsim__triggerIcon {
   display: inline-flex;
   align-items: center;
@@ -1026,6 +1443,7 @@ const STRESS_TEST_CSS = `
 .stsim__hint strong { color: var(--accent); font-weight: 700; }
 
 /* ---------- terminal ---------- */
+.stsim__termCell { position: relative; z-index: 1; }
 .stsim__termBar {
   display: flex;
   justify-content: space-between;
@@ -1035,7 +1453,7 @@ const STRESS_TEST_CSS = `
   font-size: 10px;
   letter-spacing: 0.2em;
   color: var(--accent);
-  border-bottom: 1px solid var(--grid-soft);
+  border-bottom: 1px solid var(--border);
 }
 .stsim__termDot { color: var(--red); animation: stsimBlink 1.4s steps(1) infinite; }
 @keyframes stsimBlink { 0%,50%{opacity:1;} 51%,100%{opacity:0.2;} }
@@ -1055,48 +1473,31 @@ const STRESS_TEST_CSS = `
 .stsim__logline--warn { color: var(--orange); }
 .stsim__logline--err  { color: var(--red); }
 
-/* ===========================================================================
- *  STATE THEMES — toggled imperatively on .stsim__panel
- * ========================================================================= */
-
-/* STANDARD :: nominal (under load threshold) — calm cream/orange */
-.stsim__panel.is-nominal { --fg: var(--cream); --accent: var(--orange); --glow: rgba(244,162,97,0.35); }
-
-/* STANDARD :: warning (>5k) — orange-tinged, panel begins to flag */
-.stsim__panel.is-warning {
-  --fg: var(--cream); --accent: var(--orange); --glow: rgba(244,162,97,0.5);
-  border-color: rgba(244,162,97,0.25);
+/* ---------- radioactive glow overlay ----------
+ * Screen-blends over the whole panel; opacity is JS-driven (0 when nominal,
+ * blooming + flickering as the system approaches collapse). pointer-events:none
+ * so it never intercepts clicks. */
+.stsim__radio {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  pointer-events: none;
+  opacity: 0;
+  will-change: opacity;
+  mix-blend-mode: screen;
+  background: radial-gradient(120% 90% at 50% 45%, var(--glow), transparent 72%);
 }
-
-/* STANDARD :: critical (>20k) — full error red + collapse glow */
-.stsim__panel.is-critical {
-  --fg: var(--red); --accent: var(--red); --glow: rgba(255,59,48,0.6);
-  border-color: rgba(255,59,48,0.55);
-  box-shadow: 0 0 80px -20px rgba(255,59,48,0.45), inset 0 0 60px -30px rgba(255,59,48,0.4);
-  animation: stsimCrtFlicker 220ms steps(2) infinite;
-}
-.stsim__panel.is-critical .stsim__counter { text-shadow: 0 0 18px rgba(255,59,48,0.6); }
-@keyframes stsimCrtFlicker { 0%{opacity:1;} 50%{opacity:0.94;} 100%{opacity:1;} }
-
-/* CUSTOM :: stable — brilliant neon green with soft glow, perfectly steady */
-.stsim__panel.is-custom-stable {
-  --fg: var(--green); --accent: var(--green); --glow: rgba(74,246,38,0.55);
-  border-color: rgba(74,246,38,0.4);
-  box-shadow: 0 0 90px -28px rgba(74,246,38,0.4), inset 0 0 50px -34px rgba(74,246,38,0.35);
-}
-.stsim__panel.is-custom-stable .stsim__counter { text-shadow: 0 0 16px rgba(74,246,38,0.45); }
-.stsim__panel.is-custom-stable .stsim__svgCoreNode circle { fill: rgba(74,246,38,0.18); }
 
 /* ===========================================================================
  *  MOBILE COLLAPSE (< 768px) — single column, full-width, no asymmetry.
  * ========================================================================= */
 @media (max-width: 768px) {
   .stsim { padding: 48px 16px; }
-  .stsim__toggle { grid-template-columns: 1fr; } /* reset asymmetric grid */
-  .stsim__opt { border-right: 0; border-bottom: 1px solid var(--grid-soft); }
+  .stsim__toggle { grid-template-columns: 1fr; }
+  .stsim__opt { border-right: 0; border-bottom: 1px solid var(--border); }
   .stsim__opt:last-child { border-bottom: 0; }
-  .stsim__core { grid-template-columns: 1fr; } /* stack server + readout */
-  .stsim__svgCell { border-right: 0; border-bottom: 1px solid var(--grid-soft); min-height: 220px; }
+  .stsim__core { grid-template-columns: 1fr; }
+  .stsim__svgCell { border-right: 0; border-bottom: 1px solid var(--border); min-height: 220px; }
   .stsim__triggerRow { flex-direction: column; align-items: stretch; }
   .stsim__trigger { width: 100%; }
   .stsim__triggerInner { justify-content: space-between; }
@@ -1104,10 +1505,10 @@ const STRESS_TEST_CSS = `
   .stsim__terminal { height: 170px; }
 }
 
-/* Respect reduced-motion: kill the flicker/blink for sensitive users. */
+/* Respect reduced-motion: kill blink + the radioactive overlay entirely.
+ * (The JS already disables the glitch filter, scramble and haptics.) */
 @media (prefers-reduced-motion: reduce) {
-  .stsim__panel.is-critical { animation: none; }
   .stsim__termDot { animation: none; }
-  .stsim__panel, .stsim__trigger, .stsim__opt, .stsim__title, .stsim__counter { transition-duration: 0.001ms; }
+  .stsim__radio { display: none; }
 }
 `;
