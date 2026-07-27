@@ -1978,7 +1978,7 @@ export default function CGameEngine() {
             <div className="ce-gal-wide ce-reveal">
               <MediaSlot
                 kind="image"
-                src={`${ASSET_DIR}/immagineNegozio.jpg`}
+                src={`${ASSET_DIR}/immagineNegozio .jpg`}
                 alt="Screenshot del negozio di Forge Engine: gli oggetti acquistabili con le monete raccolte e il saldo del giocatore"
                 label="FRAME // NEGOZIO"
                 meta="CH-05 · 1280×856 · UI"
