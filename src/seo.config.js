@@ -70,7 +70,15 @@ export const ROUTES = {
     title: 'villaKoi | Esperienza Web Full-Stack',
     description:
       "villaKoi: case study di un'esperienza web dal respiro Zen. Front-end React con animazioni GSAP ScrollTrigger e backend Python/FastAPI, scalabile e sicuro.",
-    image: '/projects/koiSite.avif',
+    image: '/images/koiSite.avif',
+  },
+  '/projects/c-game-engine': {
+    title: 'Forge Engine | Game Engine 2D in C',
+    description:
+      'Forge Engine: game engine 2D per platformer scritto da zero in C puro, con Raylib come unica dipendenza. Architettura del motore, gameplay e decisioni di design.',
+    // ⚠️ asset non ancora presente: quando arriva, va in public/projects/c-game-engine/
+    //    come og-cover.jpg — 1200×630, JPG (NO webp/avif). Nessun altro cambio richiesto.
+    image: '/projects/c-game-engine/og-cover.jpg',
   },
 };
 

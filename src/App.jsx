@@ -764,6 +764,7 @@ const ContactPage    = lazy(() => import('./pages/ContactPage'));
 const ScrubbingCameraHero = lazy(() => import('./pages/ScrubbingCameraHero'));
 const WorksArchive = lazy(() => import('./pages/WorksArchive'));
 const VillaKoi = lazy(() => import('./pages/VillaKoi'));
+const CGameEngine = lazy(() => import('./pages/CGameEngine'));
 
 const SectionFallback = () => {
   return (
@@ -1314,6 +1315,10 @@ export default function App() {
             <Route
               path="/projects/software-3d-engine"
               element={<Suspense fallback={<SectionFallback />}><Software3DEngine /></Suspense>}
+            />
+            <Route
+              path="/projects/c-game-engine"
+              element={<Suspense fallback={<SectionFallback />}><CGameEngine /></Suspense>}
             />
             <Route
               path="/projects/VillaKoi"
