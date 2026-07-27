@@ -1,1345 +1,779 @@
-import { useEffect, useRef, useState, useCallback, memo } from 'react';
+/**
+ * Preloader.jsx — "THE BIRTH OF AN IDENTITY" (v11.0)
+ * ══════════════════════════════════════════════════════════════════════════
+ * Non è una schermata di caricamento. È la nascita di un'identità: un'unica
+ * inquadratura tipografica, senza stacchi, dalla prima lettera allo
+ * svelamento della homepage.
+ *
+ *   S  →  SEBASTIANO  →  MOLLO  →  le due O si aprono  →  homepage
+ *
+ * Durata complessiva ≈ 6.4s. Nero assoluto, bianco puro, nient'altro:
+ * niente gradienti, texture, particelle, grana, ombre, bagliori.
+ *
+ * ──────────────────────────────────────────────────────────────────────────
+ * COME FUNZIONA (le tre idee che reggono tutto)
+ * ──────────────────────────────────────────────────────────────────────────
+ * 1 — LAYOUT PRECALCOLATO, ANIMAZIONE A COSTO ZERO.
+ *     Le lettere vengono misurate UNA volta a font caricato, poi posizionate
+ *     in assoluto agli offset definitivi. Da quel momento l'intera sequenza
+ *     è solo `transform`: nessun reflow, nessuna lettura di layout nel loop,
+ *     nessun `width` animato. Un solo tween pilota un valore numerico e una
+ *     funzione scrive le trasformazioni delle 10 lettere per frame.
+ *
+ * 2 — LA CRESCITA NON È UN'APPARIZIONE.
+ *     Ogni lettera si apre da larghezza zero con origine a sinistra, mentre
+ *     l'intero blocco si riscala e si ricentra in continuo. Nulla entra da
+ *     fuori, nulla sfuma: la parola si estende, e la scala compensa perché
+ *     resti sempre incorniciata allo stesso modo. È il motivo per cui la S
+ *     gigante e SEBASTIANO monumentale hanno la stessa presenza ottica.
+ *
+ * 3 — LE O NON DIVENTANO MASCHERE: LO SONO GIÀ.
+ *     Lo svelamento finale non aggiunge cerchi sopra le lettere. Sono le
+ *     CONTROFORME delle due O — il loro vuoto interno — ad aprirsi e a
+ *     mangiarsi il nero, inghiottendo anche le altre lettere. Il buco parte
+ *     esattamente dal raggio della controforma, quindi non c'è nessun
+ *     istante in cui si veda un elemento nuovo comparire.
+ *
+ * ──────────────────────────────────────────────────────────────────────────
+ * DUE LIMITI DICHIARATI, NON NASCOSTI
+ * ──────────────────────────────────────────────────────────────────────────
+ * [L1] IL MORPH NON È INTERPOLAZIONE DI TRACCIATI.
+ *      Interpolare davvero il contorno di una S in quello di una M richiede
+ *      i path vettoriali dei glifi e un motore di morphing (MorphSVGPlugin,
+ *      a pagamento — verificato: nel progetto non c'è). Senza quello, un
+ *      "morph" fatto di dissolvenze sarebbe esattamente ciò che il brief
+ *      vieta. Qui la trasformazione è geometrica e sempre nitida:
+ *        · le lettere che non sopravvivono si comprimono a zero collassando
+ *          verso la vicina che resta (il brief: "fold into neighboring forms");
+ *        · le lettere che cambiano identità si riformano con una lama
+ *          orizzontale che scende: sopra la linea c'è già la nuova forma,
+ *          sotto c'è ancora la vecchia. Nessuna opacità, nessuna doppia
+ *          immagine, ogni fotogramma leggibile.
+ *      Se vuoi l'interpolazione vera dei contorni si può fare estraendo i
+ *      path dal font con opentype.js in fase di build: dimmelo e la aggiungo.
+ *
+ * [L2] L'AUDIO AL PRIMO CARICAMENTO SARÀ QUASI SEMPRE MUTO.
+ *      Tutti i browser bloccano l'audio finché l'utente non ha interagito
+ *      con la pagina: al primo ingresso non c'è stata alcuna interazione,
+ *      quindi l'AudioContext nasce sospeso. Qui il suono è sintetizzato in
+ *      tempo reale con la Web Audio API (zero file da scaricare) e viene
+ *      riprodotto SOLO se il browser lo concede; altrimenti la sequenza
+ *      prosegue identica, in silenzio, senza errori in console. Non è
+ *      aggirabile senza chiedere un click prima dell'intro.
+ *
+ * ──────────────────────────────────────────────────────────────────────────
+ * TIPOGRAFIA
+ * ──────────────────────────────────────────────────────────────────────────
+ * Lo stack cerca prima i grotesque editoriali del brief (Neue Haas Grotesk
+ * Display, PP Neue Montreal, Suisse Int'l, ABC Diatype): se un giorno ne
+ * self-hosti uno, viene adottato senza toccare il codice. Il fallback reale
+ * è Outfit 900, l'unico peso ultra-bold già caricato dal sito — verificato
+ * in index.html. La sequenza attende `document.fonts.ready` prima di
+ * mostrare la S: altrimenti il primo fotogramma userebbe un ripiego di
+ * sistema e la lettera cambierebbe forma sotto gli occhi.
+ *
+ * ──────────────────────────────────────────────────────────────────────────
+ * ACCESSIBILITÀ E CONTROLLO
+ * ──────────────────────────────────────────────────────────────────────────
+ * · prefers-reduced-motion: nessun tween, nessun audio. Mostra la parola
+ *   finale per mezzo secondo e cede il passo alla homepage.
+ * · Click, Esc, Invio o Spazio saltano subito allo svelamento.
+ * · SKIP_IF_SEEN (in cima al file): se lo porti a true, l'intro va per
+ *   intero solo la prima volta nella sessione. Lasciato su false perché è
+ *   una scelta editoriale, non tecnica.
+ * · Guardia anti doppio-avvio per React StrictMode.
+ */
+
+import { useEffect, useRef, useCallback } from 'react';
 import gsap from 'gsap';
 
-/* ════════════════════════════════════════════════════════════════════
-   PRELOADER — "MONOLITH / NEURAL UPLINK"
-   ────────────────────────────────────────────────────────────────────
-   Concept  : il risveglio di un'infrastruttura Python (Uvicorn/FastAPI)
-              che stabilisce un uplink crittografato col frontend.
-              Estetica Cyber-Luxury / Data-Art: nero OLED, hairline
-              bone-white, un solo accento ambra. Niente pioggia verde.
+/* ══════════════════════════════════════════════════════════════════════════
+   CONFIGURAZIONE
+══════════════════════════════════════════════════════════════════════════ */
 
-   Scena    : un icosaedro wireframe ("il Core") sospeso sopra un
-              terreno-dati prospettico in ridgeline (Blade Runner 2049),
-              orbitato da particelle. L'energia della scena è guidata
-              dal progresso di boot (0→1): più il backend si sveglia,
-              più il Core accelera, si illumina e respira.
+const SOURCE = 'SEBASTIANO';
 
-   Audio    : sintesi procedurale pura (zero asset) — motore "Aether".
-              Catena master a brickwall-limiter per spingere a 0dBFS,
-              drone sub-bass STEREO detunato, tick aptici croccanti,
-              "braam" finale saturato a valvola (WaveShaper) con sub
-              boom da far tremare la sedia. Cfr. Dune / BR2049 / Zimmer.
+/* Mappa posizionale: per ogni lettera di SEBASTIANO, cosa diventa.
+   null = si ripiega nella vicina che sopravvive.
+      S → M      E ✕      B ✕      A → O      S ✕
+      T → L      I ✕      A → L      N ✕      O → O (unica superstite reale)
+   L'ordine dei superstiti dà esattamente M-O-L-L-O. */
+const MORPH_MAP = ['M', null, null, 'O', null, 'L', null, 'L', null, 'O'];
 
-   Performance:
-   - Canvas 2D singolo, un solo rAF, geometria pre-allocata,
-     ZERO allocazioni nel loop di draw.
-   - ridgeNoise inlinato con ricorrenza trigonometrica (rotazione di
-     fase): trig solo per-RIGA, non per-vertice → ~60× meno sin/cos.
-   - Additive blending ('lighter') per il glow ottico ambra senza
-     shadowBlur (che è un killer di fill-rate).
-   - Quality Governor adattivo a 3 tier: misura il frame-time medio
-     e degrada DPR/densità finché non tiene i 60fps.
-   - 100dvh + fallback --real-vh, resize intelligente (ignora la
-     URL bar iOS), touch-lock sul body, cleanup chirurgico.
-════════════════════════════════════════════════════════════════════ */
+/* Indici delle due O finali: da qui nascono le maschere. */
+const O_SLOTS = [3, 9];
 
-/* ═══════════════════════════════════════════════════════════════
-   DESIGN TOKENS — palette severa: void / bone / amber
-═══════════════════════════════════════════════════════════════ */
-const T = {
-  void:      '#050505',
-  bone:      '#E8E3D8',
-  boneDim:   'rgba(232,227,216,0.45)',
-  boneGhost: 'rgba(232,227,216,0.14)',
-  hairline:  'rgba(232,227,216,0.08)',
-  amber:     '#D89C4A',
-  amberDim:  'rgba(216,156,74,0.40)',
-  amberGhost:'rgba(216,156,74,0.10)',
+const TYPE_STACK =
+  "'Neue Haas Grotesk Display','PP Neue Montreal','Suisse Intl','ABC Diatype','Outfit','Helvetica Neue',system-ui,sans-serif";
+
+const MEASURE_PX = 200;   // font-size di misurazione: più alto = misure più precise
+const TRACKING = -0.055;  // crenatura strettissima, in em
+const FIT_W = 0.86;       // quota di larghezza viewport occupata dal blocco
+const FIT_H = 0.58;       // tetto di altezza: impedisce alla S sola di sfondare
+
+/* Portalo a true per far vedere l'intro solo alla prima visita della sessione. */
+const SKIP_IF_SEEN = false;
+const SEEN_KEY = 'sm_identity_seen';
+
+/* Curve: nessun rimbalzo, nessun overshoot. Accelerazione impercettibile,
+   decelerazione lunghissima — il movimento del marmo, non della gomma. */
+const E = {
+  grow:  'power3.inOut',
+  morph: 'power2.inOut',
+  mask:  'power4.inOut',
+  soft:  'power2.out',
 };
-const MONO = "'JetBrains Mono','IBM Plex Mono','ui-monospace','SFMono-Regular',Menlo,monospace";
 
-/* Padding orizzontale unificato — clamp() previene overflow a 320px */
-const PX = 'clamp(0.85rem, 4vw, 3rem)';
+const T = {
+  blackHold:  0.25,  // silenzio iniziale
+  breathIn:   0.95,  // inizio del respiro
+  growStart:  1.15,
+  growDur:    2.20,
+  stabilize:  0.60,
+  morphDur:   1.30,
+  oHold:      0.42,
+  maskDur:    0.95,
+};
 
-/* Caratteri usati dal decode-reveal delle righe di log.
-   Set ristretto e "tipografico" — niente glitch arcade. */
-const DECODE_CHARS = '·:¦/\\—_';
+/* Istante in cui comincia lo svelamento: serve anche allo skip. */
+const MASK_AT = T.growStart + T.growDur + T.stabilize + T.morphDur + T.oHold;
 
+/* ══════════════════════════════════════════════════════════════════════════
+   AUDIO — sintesi Web Audio, zero asset. Silenzioso se il browser blocca.
+══════════════════════════════════════════════════════════════════════════ */
+function createAudio() {
+  let ctx = null;
+  let master = null;
+  let drone = null;
+  let blocked = false;
 
-/* ═══════════════════════════════════════════════════════════════
-   QUALITY GOVERNOR — tier di qualità per il Canvas
-   ───────────────────────────────────────────────────────────────
-   Il loop misura il frame-time medio su finestre di 90 frame.
-   Se la media supera i 19ms (≈52fps), degrada di un tier:
-   meno DPR → meno pixel da riempire (il collo di bottiglia
-   reale su mobile è il fill-rate, non la geometria).
-   Mobile parte direttamente dal tier 1 per non friggere
-   la batteria su device vecchi.
-═══════════════════════════════════════════════════════════════ */
-const QUALITY_TIERS = [
-  { dprCap: 2.0,  terrainCols: 64, terrainRows: 22, particles: 64 },
-  { dprCap: 1.5,  terrainCols: 48, terrainRows: 16, particles: 40 },
-  { dprCap: 1.0,  terrainCols: 32, terrainRows: 12, particles: 24 },
-];
-const FRAME_WINDOW   = 90;   // frame per finestra di misura
-const FRAME_BUDGET   = 19;   // ms medi oltre i quali si degrada
-
-
-/* ═══════════════════════════════════════════════════════════════
-   GEOMETRIA — icosaedro unitario (12 vertici / 30 spigoli)
-   Calcolata UNA volta a module-scope, mai nel render path.
-═══════════════════════════════════════════════════════════════ */
-function buildIcosahedron() {
-  const t = (1 + Math.sqrt(5)) / 2;
-  const raw = [
-    [-1,  t,  0], [ 1,  t,  0], [-1, -t,  0], [ 1, -t,  0],
-    [ 0, -1,  t], [ 0,  1,  t], [ 0, -1, -t], [ 0,  1, -t],
-    [ t,  0, -1], [ t,  0,  1], [-t,  0, -1], [-t,  0,  1],
-  ];
-  // Normalizza sui raggi unitari
-  const verts = raw.map(p => {
-    const l = Math.hypot(p[0], p[1], p[2]);
-    return [p[0] / l, p[1] / l, p[2] / l];
-  });
-  // Deriva i 30 spigoli unici dalle 20 facce (dedupe via Set)
-  const faces = [
-    [0,11,5],[0,5,1],[0,1,7],[0,7,10],[0,10,11],
-    [1,5,9],[5,11,4],[11,10,2],[10,7,6],[7,1,8],
-    [3,9,4],[3,4,2],[3,2,6],[3,6,8],[3,8,9],
-    [4,9,5],[2,4,11],[6,2,10],[8,6,7],[9,8,1],
-  ];
-  const seen = new Set();
-  const edges = [];
-  for (const [a, b, c] of faces) {
-    for (const [i, j] of [[a,b],[b,c],[c,a]]) {
-      const key = i < j ? `${i}_${j}` : `${j}_${i}`;
-      if (!seen.has(key)) { seen.add(key); edges.push([Math.min(i,j), Math.max(i,j)]); }
-    }
-  }
-  return { verts, edges };
-}
-const ICO = buildIcosahedron();
-
-/* ─────────────────────────────────────────────────────────────────
-   ridgeNoise — REFERENCE IMPLEMENTATION (NON usata nel loop)
-   Somma di 3 sinusoidi sfasate: zero memoria, look organico.
-   Nel render path NON la chiamiamo: il terreno la inlina con una
-   ricorrenza di rotazione (vedi draw → sezione TERRENO), che calcola
-   sin/cos UNA sola volta per riga e poi avanza la fase per colonna
-   con sole 6 moltiplicazioni — eliminando migliaia di Math.sin/frame.
-       term1: sin(x·2.10 + z·1.30 + t·0.50) · 0.45
-       term2: sin(x·4.70 − z·2.20 + t·0.32) · 0.25
-       term3: cos(x·1.20 + z·3.10 − t·0.21) · 0.30
-───────────────────────────────────────────────────────────────── */
-
-
-/* ═══════════════════════════════════════════════════════════════
-   AUDIO ENGINE "AETHER" — sintesi procedurale pura, zero file
-   ───────────────────────────────────────────────────────────────
-   CATENA MASTER (gain staging cinematografico):
-
-      [sorgenti] → bus(drive) → glue(WaveShaper soft) →
-                 → limiter(brickwall) → master(0.92) → destination
-
-   • bus      : punto di somma "caldo": tutte le voci ci sbattono
-                dentro con headroom negativo, così il limiter lavora
-                sempre e la loudness percepita sale (stile mastering).
-   • glue     : WaveShaper a tanh leggerissimo (drive 1.1). Arrotonda
-                i picchi PRIMA del limiter (soft-clip), aggiunge una
-                seconda/terza armonica di "collante" e ricostruisce la
-                fondamentale mancante → i sub si sentono anche sugli
-                speaker dei telefoni (missing-fundamental psicoacustico).
-   • limiter  : DynamicsCompressor configurato come BRICKWALL —
-                threshold −1.5dBFS, knee 0 (hard), ratio 20:1, attack
-                0.002s (quasi istantaneo), release 0.12s. Tiene i picchi
-                sotto 0dBFS qualunque cosa gli mandi sopra → si può
-                spingere il volume al massimo senza clipping sgradevole.
-
-   API: init / startDrone / stopDrone / tick / braam / destroy / ok
-═══════════════════════════════════════════════════════════════ */
-
-/* WaveShaper curve — saturazione "valvolare" via tanh, pre-calcolata.
-   drive alto = più armoniche/grinta; drive basso = solo glue. */
-function buildSatCurve(drive, n = 2048) {
-  const c = new Float32Array(n);
-  for (let i = 0; i < n; i++) {
-    const x = (i / (n - 1)) * 2 - 1;
-    c[i] = Math.tanh(x * drive); // soft-clip simmetrico, niente alias duri
-  }
-  return c;
-}
-const SAT_WARM = buildSatCurve(2.6); // bassi del braam: caldo, "a valvole"
-const SAT_GLUE = buildSatCurve(1.1); // bus: collante quasi trasparente
-
-function createAudioEngine() {
-  let ctx     = null;
-  let bus     = null;  // punto di somma caldo
-  let limiter = null;  // brickwall finale
-  let master  = null;  // trim d'uscita
-  let drone   = null;
-
-  // iOS impiega qualche ms per passare a 'running': non controlliamo
-  // lo stato, solo che il contesto e la catena esistano.
-  const ok = () => ctx !== null && bus !== null;
-
-  function init() {
+  const init = () => {
+    if (ctx || blocked) return ctx;
     try {
-      const Ctx = window.AudioContext || window.webkitAudioContext;
-      if (!window.audioCtx) window.audioCtx = new Ctx();
-      ctx = window.audioCtx; // contesto globale condiviso col resto del sito
-
-      // ✨ UNLOCK iOS: un buffer muto da 1 sample forza Safari a
-      // "svegliare" l'hardware audio dentro lo user-gesture corrente.
-      // Eseguito ad OGNI init() (idempotente) → robusto a re-gesture.
-      const unlock = ctx.createBufferSource();
-      unlock.buffer = ctx.createBuffer(1, 1, ctx.sampleRate);
-      unlock.connect(ctx.destination);
-      unlock.start(0);
-      if (ctx.state !== 'running') ctx.resume().catch(() => {});
-
-      // La catena master si costruisce UNA volta sola.
-      if (master) return;
-
-      bus = ctx.createGain();
-      bus.gain.value = 1.0;
-
-      const glue = ctx.createWaveShaper();
-      glue.curve = SAT_GLUE;
-      glue.oversample = '4x'; // anti-alias sulla saturazione
-
-      limiter = ctx.createDynamicsCompressor();
-      limiter.threshold.value = -1.5; // ceiling appena sotto 0dBFS
-      limiter.knee.value      = 0;    // hard knee = limiting, non compressione
-      limiter.ratio.value     = 20;   // massimo → brickwall
-      limiter.attack.value    = 0.002;// quasi istantaneo: blocca i transienti
-      limiter.release.value   = 0.12; // veloce ma senza pumping udibile
-
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) { blocked = true; return null; }
+      ctx = new AC();
       master = ctx.createGain();
-      master.gain.value = 0.92;       // trim finale (lasciamo respiro al DAC)
-
-      bus.connect(glue);
-      glue.connect(limiter);
-      limiter.connect(master);
+      master.gain.value = 0.5;
       master.connect(ctx.destination);
+      // Se il browser non concede l'audio il contesto resta 'suspended':
+      // resume() fallisce in silenzio e tutto il resto diventa no-op.
+      if (ctx.state === 'suspended') ctx.resume().catch(() => {});
     } catch {
-      ctx = null; bus = null; limiter = null; master = null;
+      blocked = true;
+      ctx = null;
     }
-  }
-
-  /* ── DRONE — sub-bass STEREO detunato, più largo e minaccioso ──
-     Due "voci" identiche detunate ±8 cent e pannate L/R → larghezza
-     stereo e leggero beating organico. Sotto la fondamentale (D1,
-     36.7Hz) aggiungiamo una sub-octave (D0, 18.35Hz) per la minaccia.
-     Un lowpass risonante (Q 1.4) "respira" via LFO 0.06Hz. */
-  function startDrone() {
-    if (!ok() || drone) return;
-    const now = ctx.currentTime;
-
-    // Filtro risonante condiviso (respiro lento via LFO sul cutoff)
-    const filt = ctx.createBiquadFilter();
-    filt.type = 'lowpass';
-    filt.frequency.value = 130;
-    filt.Q.value = 1.4; // più risonanza = più "denti", più minaccioso
-
-    const lfo     = ctx.createOscillator();
-    const lfoGain = ctx.createGain();
-    lfo.type = 'sine';
-    lfo.frequency.value = 0.06;
-    lfoGain.gain.value  = 70;
-    lfo.connect(lfoGain);
-    lfoGain.connect(filt.frequency);
-    lfo.start(now);
-
-    const droneGain = ctx.createGain();
-    droneGain.gain.setValueAtTime(0.0001, now);
-    droneGain.gain.exponentialRampToValueAtTime(0.62, now + 2.2); // più corposo
-
-    filt.connect(droneGain);
-    droneGain.connect(bus);
-
-    const partials = [
-      { f: 18.35, type: 'sine',     v: 0.30 }, // sub-octave (D0): minaccia
-      { f: 36.70, type: 'sine',     v: 0.55 }, // fondamentale (D1)
-      { f: 55.10, type: 'sine',     v: 0.30 }, // quinta
-      { f: 73.40, type: 'triangle', v: 0.12 }, // ottava, un filo di grana
-    ];
-    const voices = [
-      { detune: -8, pan: -0.55 },
-      { detune:  8, pan:  0.55 },
-    ];
-
-    const oscs = [];
-    const canPan = typeof ctx.createStereoPanner === 'function';
-    voices.forEach(({ detune, pan }) => {
-      const vGain = ctx.createGain();
-      vGain.gain.value = 0.5;
-      if (canPan) {
-        const panner = ctx.createStereoPanner();
-        panner.pan.value = pan;
-        vGain.connect(panner);
-        panner.connect(filt);
-      } else {
-        vGain.connect(filt); // fallback mono (vecchi WebView)
-      }
-      partials.forEach(({ f, type, v }) => {
-        const osc = ctx.createOscillator();
-        const g   = ctx.createGain();
-        osc.type = type;
-        osc.frequency.value = f;
-        osc.detune.value = detune;
-        g.gain.value = v;
-        osc.connect(g);
-        g.connect(vGain);
-        osc.start(now);
-        oscs.push(osc);
-      });
-    });
-
-    drone = { gain: droneGain, oscs, lfo };
-  }
-
-  function stopDrone(fade = 1.0) {
-    if (!ctx || !drone) return;
-    const now = ctx.currentTime;
-    drone.gain.gain.cancelScheduledValues(now);
-    drone.gain.gain.setValueAtTime(Math.max(drone.gain.gain.value, 0.0001), now);
-    drone.gain.gain.exponentialRampToValueAtTime(0.0001, now + fade);
-    const stopAt = now + fade + 0.1;
-    drone.oscs.forEach(o => o.stop(stopAt));
-    drone.lfo.stop(stopAt);
-    drone = null;
-  }
-
-  /* ── TICK — click aptico secco, croccante e DIGITALE ──
-     Burst di rumore cortissimo (6ms) attraverso un bandpass stretto
-     (Q 2.2) a frequenza randomizzata → mai due tick uguali. Volume
-     alto e release brevissima: deve BUCARE il mix, non accompagnarlo. */
-  function tick() {
-    if (!ok()) return;
-    const now = ctx.currentTime;
-    const len = Math.floor(ctx.sampleRate * 0.006); // più corto = più secco
-    const buf = ctx.createBuffer(1, len, ctx.sampleRate);
-    const d   = buf.getChannelData(0);
-    for (let i = 0; i < len; i++)
-      d[i] = (Math.random() * 2 - 1) * Math.exp(-i / (len * 0.06)); // decay strettissimo
-    const src = ctx.createBufferSource();
-    const bp  = ctx.createBiquadFilter();
-    const g   = ctx.createGain();
-    src.buffer = buf;
-    bp.type = 'bandpass';
-    bp.frequency.value = 2600 + Math.random() * 1800; // 2.6–4.4kHz: presenza/aria
-    bp.Q.value = 2.2;                                  // banda stretta = "digitale"
-    g.gain.setValueAtTime(0.36, now);                  // ~7× più forte di prima
-    g.gain.exponentialRampToValueAtTime(0.0001, now + 0.04); // release cortissima
-    src.connect(bp); bp.connect(g); g.connect(bus);
-    src.start(now);
-  }
-
-  /* ── BRAAM — l'impatto finale dell'uplink. Deve far tremare la sedia.
-     4 strati:
-       1) IMPACT  : transiente di rumore lowpassato → la "botta" iniziale.
-       2) SUB BOOM: sine 62→28Hz in caduta → chest-thump fisico.
-       3) BODY    : sawtooth detunati in caduta di pitch, spinti dentro un
-                    WaveShaper caldo (SAT_WARM) e un lowpass che si chiude
-                    700→60Hz → il "BRAAAM" ottonato e saturato.
-       4) SHIMMER : quinte/ottave alte, quiete, per lo scintillio in cima.
-     Tutto scommato sul bus caldo: il limiter brickwall tiene i picchi a
-     0dBFS, quindi è ESPLOSIVO ma non sgradevole su mobile. */
-  function braam() {
-    if (!ok()) return;
-    const now = ctx.currentTime;
-
-    const braamBus = ctx.createGain();
-    braamBus.gain.value = 1.0;
-    braamBus.connect(bus);
-
-    // 1 · IMPACT — transiente percussivo (la "botta")
-    const impLen = Math.floor(ctx.sampleRate * 0.05);
-    const impBuf = ctx.createBuffer(1, impLen, ctx.sampleRate);
-    const idata  = impBuf.getChannelData(0);
-    for (let i = 0; i < impLen; i++)
-      idata[i] = (Math.random() * 2 - 1) * Math.exp(-i / (impLen * 0.12));
-    const imp   = ctx.createBufferSource();
-    const impLp = ctx.createBiquadFilter();
-    const impG  = ctx.createGain();
-    imp.buffer = impBuf;
-    impLp.type = 'lowpass';
-    impLp.frequency.value = 1800;
-    impG.gain.value = 0.6;
-    imp.connect(impLp); impLp.connect(impG); impG.connect(braamBus);
-    imp.start(now);
-
-    // 2 · SUB BOOM — sine in caduta drammatica: il colpo allo sterno
-    const boom  = ctx.createOscillator();
-    const boomG = ctx.createGain();
-    boom.type = 'sine';
-    boom.frequency.setValueAtTime(62, now);
-    boom.frequency.exponentialRampToValueAtTime(28, now + 0.9);
-    boomG.gain.setValueAtTime(0.0001, now);
-    boomG.gain.exponentialRampToValueAtTime(0.95, now + 0.04); // attacco esplosivo
-    boomG.gain.exponentialRampToValueAtTime(0.0001, now + 2.6);
-    boom.connect(boomG); boomG.connect(braamBus);
-    boom.start(now); boom.stop(now + 2.7);
-
-    // 3 · BODY — ottoni saturati: drive → WaveShaper caldo → lowpass che chiude
-    const drive  = ctx.createGain();
-    drive.gain.value = 2.2; // spinge il segnale dentro la curva di saturazione
-    const shaper = ctx.createWaveShaper();
-    shaper.curve = SAT_WARM;
-    shaper.oversample = '4x';
-    const lp = ctx.createBiquadFilter();
-    lp.type = 'lowpass';
-    lp.frequency.setValueAtTime(700, now);
-    lp.frequency.exponentialRampToValueAtTime(60, now + 3.0); // si fa cupo
-    lp.Q.value = 1.1;
-    const bodyG = ctx.createGain();
-    bodyG.gain.setValueAtTime(0.0001, now);
-    bodyG.gain.exponentialRampToValueAtTime(0.9, now + 0.07);
-    bodyG.gain.exponentialRampToValueAtTime(0.0001, now + 3.4);
-    drive.connect(shaper); shaper.connect(lp); lp.connect(bodyG); bodyG.connect(braamBus);
-
-    [
-      { f: 41.20, type: 'sawtooth', v: 0.55, detune: -7 }, // E1, coppia detunata
-      { f: 41.20, type: 'sawtooth', v: 0.55, detune:  7 }, //     → larghezza/beating
-      { f: 61.74, type: 'sawtooth', v: 0.32, detune:  0 }, // quinta
-      { f: 82.40, type: 'triangle', v: 0.20, detune:  0 }, // ottava
-    ].forEach(({ f, type, v, detune }) => {
-      const osc = ctx.createOscillator();
-      const g   = ctx.createGain();
-      osc.type = type;
-      osc.detune.value = detune;
-      osc.frequency.setValueAtTime(f, now);
-      osc.frequency.exponentialRampToValueAtTime(f * 0.94, now + 3.2); // drop più marcato
-      g.gain.value = v;
-      osc.connect(g); g.connect(drive);
-      osc.start(now); osc.stop(now + 3.5);
-    });
-
-    // 4 · SHIMMER — scintillio armonico in alto, quietissimo
-    [329.63, 392.00, 493.88].forEach((f, i) => {
-      const osc = ctx.createOscillator();
-      const g   = ctx.createGain();
-      const t0  = now + 0.12 + i * 0.07;
-      osc.type = 'sine';
-      osc.frequency.value = f;
-      g.gain.setValueAtTime(0.0001, t0);
-      g.gain.exponentialRampToValueAtTime(0.05, t0 + 0.35);
-      g.gain.exponentialRampToValueAtTime(0.0001, t0 + 2.2);
-      osc.connect(g); g.connect(braamBus);
-      osc.start(t0); osc.stop(t0 + 2.4);
-    });
-  }
-
-  function destroy() {
-    try { stopDrone(0.05); } catch { /* engine già spento: ignora */ }
-    // NON chiudiamo ctx: window.audioCtx resta vivo per le altre pagine.
-    // Rilasciamo solo i riferimenti locali al Preloader.
-    bus = null; limiter = null; master = null; drone = null;
-  }
-
-  return { init, startDrone, stopDrone, tick, braam, destroy, ok };
-}
-
-
-/* ═══════════════════════════════════════════════════════════════
-   LOG LINES — sequenza di boot Uvicorn/FastAPI → neural uplink
-   `at` = frazione della durata totale a cui appare la riga
-═══════════════════════════════════════════════════════════════ */
-const LOG_LINES = [
-  { text: 'PYTHON 3.12 — RUNTIME ACQUIRED · THREAD 0',      accent: false, at: 0.02 },
-  { text: 'UVICORN 0.30 — ASGI/3 LIFESPAN INIT',            accent: false, at: 0.12 },
-  { text: 'FASTAPI ROUTER — 48 ENDPOINTS BOUND',            accent: true,  at: 0.24 },
-  { text: 'X25519 KEY EXCHANGE — CHANNEL SEALED',           accent: false, at: 0.38 },
-  { text: 'AES-256-GCM — STREAM CIPHER ARMED',              accent: false, at: 0.52 },
-  { text: 'WEBSOCKET BRIDGE — FRAME SYNC LOCKED',           accent: true,  at: 0.66 },
-  { text: 'TELEMETRY MESH — 12 NODES COHERENT',             accent: false, at: 0.80 },
-  { text: 'NEURAL UPLINK ESTABLISHED — HANDOVER',           accent: true,  at: 0.93 },
-];
-
-/* Etichette di fase mostrate come eyebrow sopra il counter */
-const PHASES = ['HANDSHAKE', 'DECRYPTING', 'SYNCHRONIZING', 'UPLINK LIVE'];
-const phaseIndex = p => (p < 25 ? 0 : p < 55 ? 1 : p < 88 ? 2 : 3);
-
-
-/* ═══════════════════════════════════════════════════════════════
-   DECODE LINE — reveal tipografico left→right, niente glitch arcade
-═══════════════════════════════════════════════════════════════ */
-const DecodeLine = memo(({ text, accent, onReveal }) => {
-  const ref = useRef(null);
-
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    onReveal?.(); // un solo tick aptico per riga, non per carattere
-    let i = 0;
-    const str = String(text);
-    const id = setInterval(() => {
-      let out = '';
-      for (let k = 0; k < str.length; k++) {
-        if (str[k] === ' ')      out += ' ';
-        else if (k < i)          out += str[k];
-        else                     out += DECODE_CHARS[(k * 7 + i * 3) % DECODE_CHARS.length];
-      }
-      el.textContent = out;
-      i += 3;
-      if (i >= str.length + 3) { clearInterval(id); el.textContent = str; }
-    }, 16);
-    return () => clearInterval(id);
-  }, [text, onReveal]);
-
-  return (
-    <div
-      ref={ref}
-      style={{
-        color: accent ? T.amber : T.boneDim,
-        whiteSpace: 'nowrap',
-        overflow: 'hidden',
-        textOverflow: 'ellipsis',
-        fontVariantNumeric: 'tabular-nums',
-        minWidth: 0, // necessario nei flex children per rispettare l'ellipsis
-      }}
-    >
-      {text}
-    </div>
-  );
-});
-
-
-/* ═══════════════════════════════════════════════════════════════
-   GATE SCREEN — sblocco AudioContext al primissimo touch
-   ───────────────────────────────────────────────────────────────
-   L'engine viene creato EAGER dal Preloader (audioRef già popolato),
-   quindi qui init()/startDrone() girano DENTRO lo user-gesture reale
-   (pointerdown/touchstart/click) — l'unico punto in cui Safari iOS
-   strict autorizza il risveglio dell'hardware audio.
-═══════════════════════════════════════════════════════════════ */
-function GateScreen({ onEnter, audioRef }) {
-  const gateRef = useRef(null);
-  const textRef = useRef(null);
-
-  useEffect(() => {
-    const tween = gsap.fromTo(
-      textRef.current,
-      { opacity: 0, y: 10 },
-      { opacity: 1, y: 0, duration: 1.4, ease: 'expo.out', delay: 0.25, force3D: true }
-    );
-    return () => tween.kill();
-  }, []);
-
-  // Unlock il più precoce possibile: già su pointerdown/touchstart.
-  const initAudio = useCallback(() => {
-    audioRef.current?.init?.();
-  }, [audioRef]);
-
-  const handleClick = () => {
-    initAudio();
-    // Avvia il drone DENTRO il gesture per aggirare i blocchi iOS.
-    audioRef.current?.startDrone?.();
-
-    gsap.to(gateRef.current, {
-      opacity: 0,
-      duration: 0.4,
-      ease: 'power2.in',
-      force3D: true,
-      onComplete: onEnter,
-    });
+    return ctx;
   };
 
-  return (
-    <div
-      ref={gateRef}
-      onPointerDown={initAudio}
-      onTouchStart={initAudio}
-      onClick={handleClick}
-      style={{
-        position: 'absolute', inset: 0, zIndex: 30,
-        background: T.void,
-        display: 'flex', flexDirection: 'column',
-        alignItems: 'center', justifyContent: 'center',
-        cursor: 'pointer', userSelect: 'none',
-        willChange: 'opacity',
-      }}
-    >
-      {/* Crosshair '+' agli angoli — registri da blueprint */}
-      {[
-        { top: '1.6rem', left: '1.6rem' }, { top: '1.6rem', right: '1.6rem' },
-        { bottom: '1.6rem', left: '1.6rem' }, { bottom: '1.6rem', right: '1.6rem' },
-      ].map((pos, i) => (
-        <span key={i} aria-hidden style={{
-          position: 'absolute', ...pos,
-          fontFamily: MONO, fontSize: '0.8rem',
-          color: T.boneGhost, lineHeight: 1,
-        }}>+</span>
-      ))}
+  const ready = () => {
+    const c = init();
+    return c && c.state === 'running' ? c : null;
+  };
 
-      <div
-        ref={textRef}
-        style={{
-          display: 'flex', flexDirection: 'column', alignItems: 'center',
-          gap: '1.6rem', opacity: 0, textAlign: 'center',
-          padding: `0 ${PX}`, width: '100%', boxSizing: 'border-box',
-        }}
-      >
-        <div style={{
-          fontFamily: MONO, fontSize: 'clamp(0.5rem, 1vw, 0.62rem)',
-          color: T.boneDim, letterSpacing: '0.28em', textTransform: 'uppercase',
-          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '100%',
-        }}>
-          SEBASTIANO MOLLO — CREATIVE DEVELOPER
-        </div>
+  /* Colpo sub analogico: il marmo appoggiato a terra. */
+  const subHit = (freq = 46, dur = 1.5, vol = 0.55) => {
+    const c = ready(); if (!c) return;
+    const osc = c.createOscillator();
+    const g = c.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(freq * 1.9, c.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(freq, c.currentTime + 0.22);
+    g.gain.setValueAtTime(0.0001, c.currentTime);
+    g.gain.exponentialRampToValueAtTime(vol, c.currentTime + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001, c.currentTime + dur);
+    osc.connect(g); g.connect(master);
+    osc.start(); osc.stop(c.currentTime + dur + 0.05);
+  };
 
-        {/* Modulo Premium "Alza il Volume" */}
-        <div style={{
-          display: 'flex', alignItems: 'center', gap: '0.6rem',
-          marginBottom: '-0.4rem',
-          color: T.amber, opacity: 0.85
-        }}>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-            <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
-            <path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path>
-            <path d="M19.07 4.93a10 10 0 0 1 0 14.14"></path>
-          </svg>
-          <span style={{
-            fontFamily: MONO, fontSize: 'clamp(0.48rem, 1vw, 0.58rem)',
-            letterSpacing: '0.2em', textTransform: 'uppercase',
-          }}>
-            Alza il volume
-          </span>
-        </div>
+  /* Click tattile: rumore filtrato strettissimo, quasi un movimento di carta. */
+  const tick = (vol = 0.10) => {
+    const c = ready(); if (!c) return;
+    const len = Math.floor(c.sampleRate * 0.035);
+    const buf = c.createBuffer(1, len, c.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) {
+      data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 5);
+    }
+    const src = c.createBufferSource();
+    const bp = c.createBiquadFilter();
+    const g = c.createGain();
+    src.buffer = buf;
+    bp.type = 'bandpass';
+    bp.frequency.value = 1600 + Math.random() * 900;
+    bp.Q.value = 3.2;
+    g.gain.value = vol;
+    src.connect(bp); bp.connect(g); g.connect(master);
+    src.start();
+  };
 
-        <div className="gate-cta" style={{
-          fontFamily: MONO,
-          fontSize: 'clamp(0.72rem, 1.8vw, 1rem)',
-          color: T.bone, letterSpacing: '0.3em', textTransform: 'uppercase',
-          wordBreak: 'break-word',
-        }}>
-          [ ESTABLISH UPLINK ]
-        </div>
+  /* Drone caldo: due oscillatori appena disaccordati, nessuna melodia. */
+  const startDrone = () => {
+    const c = ready(); if (!c || drone) return;
+    const g = c.createGain();
+    g.gain.setValueAtTime(0.0001, c.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.09, c.currentTime + 2.4);
+    const lp = c.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.value = 320;
+    const a = c.createOscillator();
+    const b = c.createOscillator();
+    a.type = 'sine'; a.frequency.value = 55;
+    b.type = 'sine'; b.frequency.value = 55.6; // battimento lentissimo
+    a.connect(lp); b.connect(lp); lp.connect(g); g.connect(master);
+    a.start(); b.start();
+    drone = { a, b, g };
+  };
 
-        <div style={{
-          fontFamily: MONO, fontSize: 'clamp(0.46rem, 0.9vw, 0.56rem)',
-          color: T.boneGhost, letterSpacing: '0.22em', textTransform: 'uppercase',
-          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '100%',
-        }}>
-          ENCRYPTED AUDIO / VISUAL HANDSHAKE — TAP TO AUTHORIZE
-        </div>
-      </div>
+  const stopDrone = (fade = 0.8) => {
+    const c = ready(); if (!c || !drone) return;
+    try {
+      drone.g.gain.cancelScheduledValues(c.currentTime);
+      drone.g.gain.setValueAtTime(drone.g.gain.value || 0.0001, c.currentTime);
+      drone.g.gain.exponentialRampToValueAtTime(0.0001, c.currentTime + fade);
+      drone.a.stop(c.currentTime + fade + 0.1);
+      drone.b.stop(c.currentTime + fade + 0.1);
+    } catch { /* già fermato */ }
+    drone = null;
+  };
 
-      <style>{`
-        /* Pulse sinusoidale lento — premium, niente blink step-end */
-        .gate-cta { animation: gatePulse 2.6s cubic-bezier(0.45, 0, 0.55, 1) infinite; }
-        @keyframes gatePulse { 0%,100%{opacity:1} 50%{opacity:0.35} }
-        @media (prefers-reduced-motion: reduce) { .gate-cta { animation: none; } }
-      `}</style>
-    </div>
-  );
+  /* Braam trattenuto: autorità, non trailer. */
+  const braam = () => {
+    const c = ready(); if (!c) return;
+    const g = c.createGain();
+    g.gain.setValueAtTime(0.0001, c.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.42, c.currentTime + 0.32);
+    g.gain.exponentialRampToValueAtTime(0.0001, c.currentTime + 2.1);
+    const lp = c.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.setValueAtTime(180, c.currentTime);
+    lp.frequency.linearRampToValueAtTime(520, c.currentTime + 0.5);
+    [36, 54, 72, 108].forEach((f, i) => {
+      const o = c.createOscillator();
+      const og = c.createGain();
+      o.type = i % 2 ? 'triangle' : 'sine';
+      o.frequency.value = f;
+      og.gain.value = 1 / (i + 1.4);
+      o.connect(og); og.connect(lp);
+      o.start(); o.stop(c.currentTime + 2.2);
+    });
+    lp.connect(g); g.connect(master);
+  };
+
+  const dispose = () => {
+    stopDrone(0.05);
+    if (ctx) { try { ctx.close(); } catch { /* già chiuso */ } }
+    ctx = null; master = null;
+  };
+
+  /* Se l'utente tocca lo schermo durante l'intro, il browser sblocca
+     l'audio: da quel momento i suoni successivi si sentono. */
+  const unlock = () => {
+    const c = init();
+    if (c && c.state === 'suspended') c.resume().catch(() => {});
+  };
+
+  return { subHit, tick, startDrone, stopDrone, braam, dispose, unlock };
 }
 
-
-/* ═══════════════════════════════════════════════════════════════
-   MONOLITH SCENE — Canvas 2D: terreno-dati + Core icosaedrico
-   ───────────────────────────────────────────────────────────────
-   props (via ref, MAI via state → zero re-render React):
-   - energyRef : 0..1, progresso di boot → guida velocità/alpha
-   - flareRef  : 0..1, flash bianco + camera-shake dell'exit sequence
-   - reduced   : prefers-reduced-motion → frame statico singolo
-═══════════════════════════════════════════════════════════════ */
-const MonolithScene = memo(({ energyRef, flareRef, reduced }) => {
-  const cvRef = useRef(null);
-
-  useEffect(() => {
-    const cv = cvRef.current;
-    if (!cv) return;
-    const ctx2d = cv.getContext('2d', { alpha: false }); // opaco = compositing più economico
-
-    /* ── Stato del Quality Governor ─────────────────────────── */
-    const isMobile = window.innerWidth < 768;
-    let tierIdx = isMobile ? 1 : 0; // mobile parte già conservativo
-    let tier    = QUALITY_TIERS[tierIdx];
-    let frameAcc = 0, frameCount = 0;
-
-    /* ── Dimensioni cache (nessuna lettura DOM nel loop) ────── */
-    let W = 0, H = 0, dpr = 1;
-    let horizonY = 0;        // y dell'orizzonte (cache per il loop)
-    let atmGrad = null;      // gradiente di foschia atmosferica (cache)
-
-    /* ── Buffer pre-allocati per la proiezione del Core ──────
-       12 vertici × (x,y) × 2 gusci (outer bone + inner amber).
-       Allocati UNA volta: il loop scrive solo dentro questi.   */
-    const projOuter = new Float32Array(ICO.verts.length * 2);
-    const projInner = new Float32Array(ICO.verts.length * 2);
-
-    /* ── Particelle orbitali (parametri fissi, posizioni derivate) ── */
-    const MAX_P = QUALITY_TIERS[0].particles;
-    const pR    = new Float32Array(MAX_P); // raggio orbita
-    const pS    = new Float32Array(MAX_P); // velocità angolare
-    const pPh   = new Float32Array(MAX_P); // fase iniziale
-    const pIn   = new Float32Array(MAX_P); // inclinazione orbita
-    for (let i = 0; i < MAX_P; i++) {
-      pR[i]  = 1.45 + Math.random() * 0.9;
-      pS[i]  = (0.10 + Math.random() * 0.25) * (Math.random() > 0.5 ? 1 : -1);
-      pPh[i] = Math.random() * Math.PI * 2;
-      pIn[i] = (Math.random() - 0.5) * 1.6;
-    }
-
-    const setup = () => {
-      W   = window.innerWidth;
-      H   = window.innerHeight;
-      dpr = Math.min(window.devicePixelRatio || 1, tier.dprCap);
-      cv.width  = Math.floor(W * dpr);
-      cv.height = Math.floor(H * dpr);
-      ctx2d.setTransform(1, 0, 0, 1, 0, 0);
-      ctx2d.scale(dpr, dpr);
-      // Cache derivate dalle dimensioni (mai ricalcolate nel loop)
-      horizonY = H * 0.62;
-      // Foschia atmosferica: banda di glow ambra tenue all'orizzonte
-      atmGrad = ctx2d.createLinearGradient(0, horizonY - H * 0.12, 0, horizonY + H * 0.04);
-      atmGrad.addColorStop(0,    'rgba(216,156,74,0)');
-      atmGrad.addColorStop(0.7,  'rgba(216,156,74,0.05)');
-      atmGrad.addColorStop(1,    'rgba(216,156,74,0)');
-    };
-    setup();
-
-    /* ── Proiezione prospettica minimale ────────────────────── */
-    const FOV = 3.4;
-
-    let ax = 0.35, ay = 0; // angoli di rotazione del Core
-    let raf = 0;
-    let prevTs = 0;
-
-    const draw = (ts) => {
-      raf = requestAnimationFrame(draw);
-      if (!prevTs) prevTs = ts;
-      const dt = Math.min((ts - prevTs) / 1000, 0.05); // clamp anti-salto da tab inattiva
-      prevTs = ts;
-
-      const time   = ts / 1000;
-      const energy = energyRef.current; // 0..1
-      const flare  = flareRef.current;  // 0..1
-
-      /* ── Quality Governor: misura e degrada se serve ──────── */
-      frameAcc += dt * 1000;
-      frameCount++;
-      if (frameCount >= FRAME_WINDOW) {
-        const avg = frameAcc / frameCount;
-        frameAcc = 0; frameCount = 0;
-        if (avg > FRAME_BUDGET && tierIdx < QUALITY_TIERS.length - 1) {
-          tierIdx++;
-          tier = QUALITY_TIERS[tierIdx];
-          setup(); // riapplica il nuovo DPR cap + ricache derivate
-        }
-      }
-
-      /* ── Clear (canvas opaco → fill pieno, no trasparenza) ──
-         SEMPRE in transform base e source-over: copre tutto lo
-         schermo anche quando la scena sarà traslata dal shake.   */
-      ctx2d.globalCompositeOperation = 'source-over';
-      ctx2d.globalAlpha = 1;
-      ctx2d.fillStyle = T.void;
-      ctx2d.fillRect(0, 0, W, H);
-
-      const cx = W * 0.5;
-      const cy = H * 0.42;
-      // Respiro impercettibile del Core, legato all'energia
-      const breathe = 1 + Math.sin(time * 1.2) * 0.012 * (0.3 + energy);
-      const coreScale = Math.min(W, H) * (0.16 + energy * 0.03) * breathe;
-
-      /* ── CAMERA SHAKE — impatto fisico del braam ───────────
-         Quando flare sale (exit), traslo TUTTA la scena con un
-         offset pseudo-random ad alta frequenza. save()/restore()
-         garantisce il ripristino esatto del transform (no drift). */
-      const shaking = flare > 0.003;
-      if (shaking) {
-        ctx2d.save();
-        const mag = flare * Math.min(W, H) * 0.022;
-        const shx = (Math.sin(time * 91.0) * 0.6 + Math.sin(time * 137.0) * 0.4) * mag;
-        const shy = (Math.cos(time * 83.0) * 0.6 + Math.sin(time * 119.0) * 0.4) * mag;
-        ctx2d.translate(shx, shy);
-      }
-
-      /* ════ 1 · TERRENO-DATI (ridgeline prospettiche) ════════
-         ridgeNoise INLINATO con ricorrenza di rotazione: sin/cos
-         calcolati UNA volta per riga, poi la fase avanza per colonna
-         con 6 mul (matrice di rotazione). Zero trig nel loop interno. */
-      const rows = tier.terrainRows;
-      const cols = tier.terrainCols;
-      const camH = H * 0.46;
-      const tAmp = H * 0.055 * (0.55 + energy * 0.45);
-
-      // Delta di fase per-colonna (costanti finché cols non cambia):
-      // x va da -3 a +3 in `cols` passi → stepX = 6/cols.
-      const stepX = 6 / cols;
-      const cd1 = Math.cos(stepX * 2.10), sd1 = Math.sin(stepX * 2.10);
-      const cd2 = Math.cos(stepX * 4.70), sd2 = Math.sin(stepX * 4.70);
-      const cd3 = Math.cos(stepX * 1.20), sd3 = Math.sin(stepX * 1.20);
-      const dtxn = 2 / cols;
-      const energyMix = 0.45 + energy * 0.55;
-
-      ctx2d.lineWidth = 1;
-      ctx2d.strokeStyle = T.bone;
-      for (let j = 0; j < rows; j++) {
-        const tz    = j / (rows - 1);          // 0 = vicino, 1 = lontano
-        const zd    = 1 + tz * 6;              // profondità
-        const persp = 1 / zd;
-        const rowY  = horizonY + camH * persp;
-        const spread = W * 0.95 * (0.4 + persp * 1.6);
-        // Fading atmosferico più profondo: curva pow → maggiore vastità
-        ctx2d.globalAlpha = (0.03 + 0.20 * Math.pow(1 - tz, 1.7)) * energyMix;
-
-        // Stato iniziale della fase a x=-3 (i=0):
-        const a1 = zd * 1.30 + time * 0.50;    // term1 offset
-        const a2 = -zd * 2.20 + time * 0.32;   // term2 offset
-        const a3 = zd * 3.10 - time * 0.21;    // term3 offset
-        let s1 = Math.sin(-6.30 + a1),  c1 = Math.cos(-6.30 + a1);   // -3*2.10
-        let s2 = Math.sin(-14.10 + a2), c2 = Math.cos(-14.10 + a2);  // -3*4.70
-        let s3 = Math.sin(-3.60 + a3),  c3 = Math.cos(-3.60 + a3);   // -3*1.20
-
-        let txn = -1;
-        ctx2d.beginPath();
-        for (let i = 0; i <= cols; i++) {
-          // Maschera centrale: il terreno si placa sotto il Core
-          const mask  = Math.min(1, Math.abs(txn) * 1.5 + 0.12);
-          const yNo   = s1 * 0.45 + s2 * 0.25 + c3 * 0.30; // noise ricostruito
-          const yOff  = yNo * tAmp * persp * mask;
-          const x     = cx + txn * spread;
-          const y     = rowY - yOff;
-          if (i === 0) ctx2d.moveTo(x, y);
-          else         ctx2d.lineTo(x, y);
-          // Avanza la fase di un passo-colonna (rotazione, niente trig)
-          const n1 = s1 * cd1 + c1 * sd1; c1 = c1 * cd1 - s1 * sd1; s1 = n1;
-          const n2 = s2 * cd2 + c2 * sd2; c2 = c2 * cd2 - s2 * sd2; s2 = n2;
-          const n3 = s3 * cd3 + c3 * sd3; c3 = c3 * cd3 - s3 * sd3; s3 = n3;
-          txn += dtxn;
-        }
-        ctx2d.stroke();
-      }
-
-      // Foschia atmosferica all'orizzonte (additivo, una sola rect)
-      ctx2d.globalCompositeOperation = 'lighter';
-      ctx2d.globalAlpha = 0.5 + energy * 0.5;
-      ctx2d.fillStyle = atmGrad;
-      ctx2d.fillRect(0, horizonY - H * 0.12, W, H * 0.16);
-
-      /* ════ 2 · SCAN SWEEP (hairline ambra additiva) ═════════ */
-      const sweepY = ((time * 0.045) % 1.25 - 0.12) * H;
-      ctx2d.globalAlpha = 0.10 + energy * 0.07;
-      ctx2d.strokeStyle = T.amber;
-      ctx2d.beginPath();
-      ctx2d.moveTo(0, sweepY);
-      ctx2d.lineTo(W, sweepY);
-      ctx2d.stroke();
-      ctx2d.globalCompositeOperation = 'source-over';
-
-      /* ════ 3 · IL CORE (icosaedro doppio guscio) ════════════
-         La velocità di rotazione cresce con l'energia: il backend
-         "si sveglia" e il Core accelera. */
-      const spin = 0.10 + energy * 0.55;
-      ax += dt * spin * 0.7;
-      ay += dt * spin;
-
-      const ca = Math.cos(ax), sa = Math.sin(ax);
-      const cb = Math.cos(ay), sb = Math.sin(ay);
-
-      // Proietta i 12 vertici nei due gusci (outer 1.0 / inner 0.55,
-      // l'inner controruota usando -ay → basta invertire sb)
-      for (let i = 0; i < ICO.verts.length; i++) {
-        const v = ICO.verts[i];
-        // — guscio esterno: rotY(ay) poi rotX(ax)
-        let x1 = v[0] * cb + v[2] * sb;
-        let z1 = -v[0] * sb + v[2] * cb;
-        let y1 = v[1] * ca - z1 * sa;
-        let z2 = v[1] * sa + z1 * ca;
-        let s  = FOV / (FOV - z2);
-        projOuter[i * 2]     = cx + x1 * s * coreScale;
-        projOuter[i * 2 + 1] = cy + y1 * s * coreScale;
-        // — guscio interno: controrotazione (-ay), scala 0.55
-        x1 = v[0] * cb - v[2] * sb;
-        z1 = v[0] * sb + v[2] * cb;
-        y1 = v[1] * ca - z1 * sa;
-        z2 = v[1] * sa + z1 * ca;
-        s  = FOV / (FOV - z2);
-        projInner[i * 2]     = cx + x1 * s * coreScale * 0.55;
-        projInner[i * 2 + 1] = cy + y1 * s * coreScale * 0.55;
-      }
-
-      // Spigoli outer — hairline bone (UNA sola path, UNO stroke)
-      ctx2d.globalAlpha = 0.22 + energy * 0.45;
-      ctx2d.strokeStyle = T.bone;
-      ctx2d.beginPath();
-      for (let e = 0; e < ICO.edges.length; e++) {
-        const a = ICO.edges[e][0], b = ICO.edges[e][1];
-        ctx2d.moveTo(projOuter[a * 2], projOuter[a * 2 + 1]);
-        ctx2d.lineTo(projOuter[b * 2], projOuter[b * 2 + 1]);
-      }
-      ctx2d.stroke();
-
-      // BLOOM additivo sul guscio outer ad alta energia: un secondo
-      // stroke 'lighter' tenue → alone ottico senza shadowBlur.
-      if (energy > 0.45) {
-        ctx2d.globalCompositeOperation = 'lighter';
-        ctx2d.globalAlpha = (energy - 0.45) * 0.5;
-        ctx2d.stroke(); // riusa la path corrente: zero ricostruzione
-        ctx2d.globalCompositeOperation = 'source-over';
-      }
-
-      // Spigoli inner — ambra additiva: le intersezioni creano GLOW
-      ctx2d.globalCompositeOperation = 'lighter';
-      ctx2d.globalAlpha = 0.12 + energy * 0.34;
-      ctx2d.strokeStyle = T.amber;
-      ctx2d.beginPath();
-      for (let e = 0; e < ICO.edges.length; e++) {
-        const a = ICO.edges[e][0], b = ICO.edges[e][1];
-        ctx2d.moveTo(projInner[a * 2], projInner[a * 2 + 1]);
-        ctx2d.lineTo(projInner[b * 2], projInner[b * 2 + 1]);
-      }
-      ctx2d.stroke();
-      ctx2d.globalCompositeOperation = 'source-over';
-
-      // Vertici outer — punti 2×2 (fillRect: più economico di arc)
-      ctx2d.globalAlpha = 0.5 + energy * 0.5;
-      ctx2d.fillStyle = T.bone;
-      for (let i = 0; i < ICO.verts.length; i++) {
-        ctx2d.fillRect(projOuter[i * 2] - 1, projOuter[i * 2 + 1] - 1, 2, 2);
-      }
-
-      /* ════ 4 · PARTICELLE ORBITALI (ambra additiva) ═════════ */
-      const nP = tier.particles;
-      ctx2d.globalCompositeOperation = 'lighter';
-      ctx2d.fillStyle = T.amber;
-      for (let i = 0; i < nP; i++) {
-        const ang = pPh[i] + time * pS[i] * (0.5 + energy);
-        const x0  = Math.cos(ang) * pR[i];
-        const z0  = Math.sin(ang) * pR[i];
-        const ci  = Math.cos(pIn[i]), si = Math.sin(pIn[i]);
-        const y0  = -z0 * si;
-        const zz  = z0 * ci;
-        const s   = FOV / (FOV - zz);
-        ctx2d.globalAlpha = (0.10 + 0.25 * ((s - 0.7) / 0.8)) * (0.3 + energy * 0.7);
-        ctx2d.fillRect(
-          cx + x0 * s * coreScale - 0.75,
-          cy + y0 * s * coreScale - 0.75,
-          1.5, 1.5
-        );
-      }
-      ctx2d.globalCompositeOperation = 'source-over';
-
-      // Chiudo il blocco "scena": ripristino il transform base prima
-      // del flare (che deve coprire l'intero schermo, shake escluso).
-      if (shaking) ctx2d.restore();
-
-      /* ════ 5 · FLARE (flash dell'exit sequence) ═════════════ */
-      if (flare > 0.003) {
-        ctx2d.globalCompositeOperation = 'source-over';
-        ctx2d.globalAlpha = flare * 0.9;
-        ctx2d.fillStyle = T.bone;
-        ctx2d.fillRect(0, 0, W, H);
-        // Wash ambra additivo: il flash "scalda" verso l'accento
-        ctx2d.globalCompositeOperation = 'lighter';
-        ctx2d.globalAlpha = flare * 0.25;
-        ctx2d.fillStyle = T.amber;
-        ctx2d.fillRect(0, 0, W, H);
-      }
-      ctx2d.globalCompositeOperation = 'source-over';
-      ctx2d.globalAlpha = 1;
-    };
-
-    if (reduced) {
-      // Accessibilità: un singolo frame statico, niente loop
-      draw(16);
-      cancelAnimationFrame(raf);
-    } else {
-      raf = requestAnimationFrame(draw);
-    }
-
-    /* ── RESIZE intelligente ─────────────────────────────────
-       Ignora i resize puramente verticali (URL bar iOS che
-       appare/scompare durante lo scroll). Reagisce solo a
-       variazioni di width > 30px o cambio orientamento.       */
-    let prevW = window.innerWidth;
-    let prevOrient = window.innerWidth > window.innerHeight ? 'l' : 'p';
-    let resizeTimer = 0;
-    const handleResize = () => {
-      const nw = window.innerWidth;
-      const no = window.innerWidth > window.innerHeight ? 'l' : 'p';
-      if (Math.abs(nw - prevW) <= 30 && no === prevOrient) return;
-      clearTimeout(resizeTimer);
-      resizeTimer = setTimeout(() => {
-        prevW = nw; prevOrient = no;
-        setup();
-        if (reduced) draw(16); // ridisegna il frame statico
-      }, 200);
-    };
-
-    let ro = null;
-    if (typeof ResizeObserver !== 'undefined') {
-      ro = new ResizeObserver(handleResize);
-      ro.observe(document.documentElement);
-    } else {
-      window.addEventListener('resize', handleResize, { passive: true });
-    }
-
-    return () => {
-      // Cleanup chirurgico: rAF + timer + observer
-      cancelAnimationFrame(raf);
-      clearTimeout(resizeTimer);
-      if (ro) ro.disconnect();
-      else window.removeEventListener('resize', handleResize);
-    };
-  }, [energyRef, flareRef, reduced]);
-
-  return (
-    <canvas
-      ref={cvRef}
-      aria-hidden
-      style={{
-        position: 'absolute', inset: 0,
-        width: '100%', height: '100%',
-        zIndex: 1, pointerEvents: 'none',
-      }}
-    />
-  );
-});
-
-
-/* ═══════════════════════════════════════════════════════════════
-   MAIN PRELOADER
-═══════════════════════════════════════════════════════════════ */
+/* ══════════════════════════════════════════════════════════════════════════
+   COMPONENTE
+══════════════════════════════════════════════════════════════════════════ */
 export default function Preloader({ onComplete }) {
-  const containerRef    = useRef(null);
-  const fillRef         = useRef(null);
-  const numRef          = useRef(null);
-  const phaseRef        = useRef(null);
-  const counterMaskRef  = useRef(null);
-  const logsBoxRef      = useRef(null);
-  const statusRef       = useRef(null);
-  const audioRef        = useRef(null);
-  const exitRef         = useRef(null);
+  const rootRef = useRef(null);
+  const wordRef = useRef(null);
+  const slotRefs = useRef([]);
+  const srcRefs = useRef([]);
+  const dstRefs = useRef([]);
 
-  /* Canali numerici verso il canvas — refs, MAI state:
-     il canvas li legge a 60fps senza re-render React */
-  const energyRef = useRef(0);
-  const flareRef  = useRef(0);
+  const audioRef = useRef(null);
+  const tlRef = useRef(null);
+  const startedRef = useRef(false);   // guardia StrictMode
+  const finishedRef = useRef(false);
+  const layoutRef = useRef(null);     // misure precalcolate
 
-  const [booting, setBooting] = useState(false);
-  const [logs, setLogs]       = useState([]);
+  const finish = useCallback(() => {
+    if (finishedRef.current) return;
+    finishedRef.current = true;
+    try { sessionStorage.setItem(SEEN_KEY, '1'); } catch { /* storage negato */ }
+    onComplete?.();
+  }, [onComplete]);
 
-  const reducedMotion = typeof window !== 'undefined'
-    && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-
-  const onLogReveal = useCallback(() => { audioRef.current?.tick(); }, []);
-
-  /* ── [AUDIO] Creazione EAGER dell'engine + distruzione al dismount ──
-     Creiamo l'engine subito (non istanzia ancora alcun AudioContext:
-     quello nasce in init(), dentro lo user-gesture del GateScreen).
-     Così audioRef.current è già pronto quando il gate riceve il touch,
-     e l'unlock iOS avviene nel momento esatto autorizzato da Safari.   */
   useEffect(() => {
-    if (!audioRef.current) audioRef.current = createAudioEngine();
-    return () => { audioRef.current?.destroy(); audioRef.current = null; };
-  }, []);
+    if (startedRef.current) return undefined;
+    startedRef.current = true;
 
-  /* ── [VH] Fallback --real-vh per Safari iOS < 15.4 ─────────── */
-  useEffect(() => {
-    const setRealVH = () => {
-      document.documentElement.style.setProperty('--real-vh', `${window.innerHeight}px`);
-    };
-    setRealVH();
-    window.addEventListener('resize', setRealVH, { passive: true });
-    return () => window.removeEventListener('resize', setRealVH);
-  }, []);
+    const root = rootRef.current;
+    const word = wordRef.current;
+    if (!root || !word) return undefined;
 
-  /* ── [LOCK] Blocco scroll/rubber-banding durante il preload ── */
-  useEffect(() => {
-    const body = document.body;
-    const prev = {
-      overscrollBehavior: body.style.overscrollBehavior,
-      touchAction:        body.style.touchAction,
-      overflow:           body.style.overflow,
-    };
-    body.style.overscrollBehavior = 'none';
-    body.style.touchAction        = 'none';
-    body.style.overflow           = 'hidden';
-    return () => {
-      body.style.overscrollBehavior = prev.overscrollBehavior;
-      body.style.touchAction        = prev.touchAction;
-      body.style.overflow           = prev.overflow;
-    };
-  }, []);
+    let reduced = false;
+    try {
+      reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    } catch { reduced = false; }
 
-  /* ── EXIT SEQUENCE ──────────────────────────────────────────
-     1. pointer-events off (il preloader smette di catturare input)
-     2. braam audio + drone fade-out
-     3. flare bianco sul canvas + camera-shake (via flareRef, GSAP)
-     4. il counter scivola su dentro la maschera
-     5. iris collapse: clip-path verso la linea centrale
-     6. estinzione, rimozione will-change, onComplete            */
-  const exitSequence = useCallback(() => {
-    const el = containerRef.current;
-    if (!el) return;
-    el.style.pointerEvents = 'none'; // chirurgico: da qui il sito sotto è già interattivo
-
-    audioRef.current?.stopDrone(0.9);
-    audioRef.current?.braam();
-
-    const finish = () => {
-      el.style.willChange = '';
-      onComplete?.();
-    };
-
-    if (reducedMotion) {
-      gsap.to(el, { opacity: 0, duration: 0.6, force3D: true, onComplete: finish });
-      return;
+    let seen = false;
+    if (SKIP_IF_SEEN) {
+      try { seen = sessionStorage.getItem(SEEN_KEY) === '1'; } catch { seen = false; }
     }
 
-    const tl = gsap.timeline({ onComplete: finish });
-    tl
-      // Flash del Core — tweena direttamente flareRef.current (il canvas la legge)
-      .to(flareRef, { current: 1, duration: 0.10, ease: 'power2.in' })
-      .to(flareRef, { current: 0, duration: 0.55, ease: 'power2.out' })
-      // Il counter esce verso l'alto dentro la maschera
-      .to(counterMaskRef.current, {
-        yPercent: -115, duration: 0.6, ease: 'expo.in', force3D: true,
-      }, '-=0.55')
-      // Iris collapse del contenitore
-      .to(el, {
-        clipPath: 'inset(49.8% 0% 49.8% 0%)',
-        duration: 0.65, ease: 'expo.inOut', force3D: true,
-      }, '-=0.25')
-      .to(el, { opacity: 0, duration: 0.22, ease: 'power2.out', force3D: true }, '-=0.10');
-  }, [reducedMotion, onComplete]);
+    const slots = slotRefs.current;
+    const srcs = srcRefs.current;
 
-  // Tieni exitRef allineato all'ultima closure (legge reducedMotion/onComplete
-  // correnti). In un effect, non durante il render: il ref viene letto solo
-  // ~4.4s dopo, al termine della boot timeline → sempre già popolato.
-  useEffect(() => { exitRef.current = exitSequence; }, [exitSequence]);
+    /* ── MISURAZIONE ─────────────────────────────────────────────────────
+       Le lettere sono in assoluto e si auto-dimensionano: basta leggere il
+       loro rettangolo una volta sola, a font caricato. Da qui in poi non si
+       tocca più il layout. */
+    const measure = () => {
+      const trackPx = TRACKING * MEASURE_PX;
 
-  /* ── GATE ENTER → ensure-resume + avvio boot ───────────────────
-     L'engine è già inizializzato dentro il gesture del GateScreen
-     (init + startDrone). Qui ci limitiamo a un init() idempotente
-     (re-resume di sicurezza) e a far partire la boot sequence.     */
-  const handleGateEnter = useCallback(() => {
-    audioRef.current?.init();
-    setBooting(true);
-  }, []);
-
-  /* ── BOOT SEQUENCE ─────────────────────────────────────────── */
-  useEffect(() => {
-    if (!booting) return;
-
-    const state = { p: 0 };
-    const DUR   = reducedMotion ? 1.2 : 4.4;
-    let lastPhase = -1;
-
-    const gsapCtx = gsap.context(() => {
-      gsap.timeline({
-        onComplete: () => {
-          if (statusRef.current) statusRef.current.textContent = '● UPLINK LIVE';
-          gsap.delayedCall(0.5, () => exitRef.current?.());
-        },
-      }).to(state, {
-        p: 100,
-        duration: DUR,
-        ease: 'power2.inOut',
-        onUpdate: () => {
-          const v = Math.floor(state.p);
-          energyRef.current = state.p / 100; // il canvas legge questo a 60fps
-          if (numRef.current)  numRef.current.textContent = String(v).padStart(3, '0');
-          if (fillRef.current) fillRef.current.style.transform = `scaleX(${state.p / 100})`;
-          const ph = phaseIndex(v);
-          if (ph !== lastPhase && phaseRef.current) {
-            lastPhase = ph;
-            phaseRef.current.textContent = PHASES[ph];
-          }
-        },
+      const srcW = srcs.map((el) => (el ? el.getBoundingClientRect().width : 0));
+      const dstW = SOURCE.split('').map((_, i) => {
+        const el = dstRefs.current[i];
+        return el ? el.getBoundingClientRect().width : 0;
       });
 
-      LOG_LINES.forEach(log => {
-        gsap.delayedCall(log.at * DUR, () => setLogs(prev => [...prev, log]));
+      // offset cumulativi della parola di partenza
+      const srcX = [];
+      let acc = 0;
+      for (let i = 0; i < srcW.length; i++) {
+        srcX.push(acc);
+        acc += srcW[i] + trackPx;
+      }
+      const srcTotal = Math.max(acc - trackPx, 1);
+
+      // offset della parola d'arrivo: solo i superstiti occupano spazio
+      const dstX = new Array(srcW.length).fill(0);
+      let acc2 = 0;
+      for (let i = 0; i < srcW.length; i++) {
+        if (MORPH_MAP[i]) {
+          dstX[i] = acc2;
+          acc2 += dstW[i] + trackPx;
+        }
+      }
+      const dstTotal = Math.max(acc2 - trackPx, 1);
+
+      // chi si ripiega collassa verso il superstite successivo (o precedente)
+      for (let i = 0; i < srcW.length; i++) {
+        if (MORPH_MAP[i]) continue;
+        let j = i + 1;
+        while (j < srcW.length && !MORPH_MAP[j]) j++;
+        if (j >= srcW.length) {
+          j = i - 1;
+          while (j >= 0 && !MORPH_MAP[j]) j--;
+        }
+        dstX[i] = (j >= 0 && j < srcW.length) ? dstX[j] : 0;
+      }
+
+      const glyphH = srcs[0] ? srcs[0].getBoundingClientRect().height : MEASURE_PX;
+
+      layoutRef.current = { srcW, dstW, srcX, dstX, srcTotal, dstTotal, glyphH };
+
+      // posizionamento definitivo: da ora ogni lettera ha il suo posto
+      slots.forEach((el, i) => { if (el) el.style.left = `${srcX[i]}px`; });
+      word.style.width = `${srcTotal}px`;
+      word.style.height = `${glyphH}px`;
+    };
+
+    /* Scala e traslazione del blocco per una data larghezza visibile.
+       Con transform-origin a sinistra: schermo = centro + a + s * p,
+       quindi per centrare la porzione visibile serve a = -s * V / 2. */
+    const fit = (visibleW) => {
+      const L = layoutRef.current;
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+      const s = Math.min((FIT_W * vw) / visibleW, (FIT_H * vh) / L.glyphH);
+      return { s, a: -(s * visibleW) / 2 };
+    };
+
+    const applyWord = (visibleW) => {
+      const { s, a } = fit(visibleW);
+      word.style.transform = `translate3d(${a}px, -50%, 0) scale(${s})`;
+    };
+
+    /* ── STATO DI CRESCITA ───────────────────────────────────────────────
+       Un solo numero `n` (quante lettere sono aperte, con decimali) governa
+       tutto: le scale delle 10 lettere e la trasformazione del blocco. */
+    const growth = { n: 1 };
+    let lastTick = 1;
+
+    const renderGrowth = () => {
+      const L = layoutRef.current;
+      if (!L) return;
+      const n = growth.n;
+      const full = Math.floor(n);
+      const frac = n - full;
+
+      for (let i = 0; i < slots.length; i++) {
+        if (!slots[i]) continue;
+        let sx;
+        if (i < full) sx = 1;
+        else if (i === full) sx = frac;
+        else sx = 0;
+        slots[i].style.transform = `scaleX(${sx})`;
+      }
+
+      const visible =
+        full >= L.srcW.length
+          ? L.srcTotal
+          : L.srcX[full] + L.srcW[full] * frac;
+
+      applyWord(Math.max(visible, 1));
+
+      // un click tattile a ogni lettera che si apre
+      const reached = Math.floor(n);
+      if (reached > lastTick) {
+        lastTick = reached;
+        audioRef.current?.tick(0.085);
+      }
+    };
+
+    /* ── STATO DI MORPH ──────────────────────────────────────────────────
+       `p` da 0 a 1: le lettere si spostano verso le posizioni finali, le
+       superflue si comprimono, quelle che cambiano identità si riformano
+       sotto una lama che scende. */
+    const morph = { p: 0 };
+
+    const renderMorph = () => {
+      const L = layoutRef.current;
+      if (!L) return;
+      const p = morph.p;
+
+      for (let i = 0; i < slots.length; i++) {
+        if (!slots[i]) continue;
+        const dx = (L.dstX[i] - L.srcX[i]) * p;
+        const survives = Boolean(MORPH_MAP[i]);
+        const sx = survives ? 1 : 1 - p;
+        slots[i].style.transform = `translate3d(${dx}px,0,0) scaleX(${sx})`;
+
+        if (survives && dstRefs.current[i] && MORPH_MAP[i] !== SOURCE[i]) {
+          // lama orizzontale: sopra la nuova forma, sotto la vecchia
+          const cut = (p * 100).toFixed(2);
+          if (srcRefs.current[i]) srcRefs.current[i].style.clipPath = `inset(${cut}% 0% 0% 0%)`;
+          dstRefs.current[i].style.clipPath = `inset(0% 0% ${(100 - p * 100).toFixed(2)}% 0%)`;
+        }
+      }
+
+      const visible = L.srcTotal + (L.dstTotal - L.srcTotal) * p;
+      applyWord(Math.max(visible, 1));
+    };
+
+    /* ── MASCHERA FINALE ─────────────────────────────────────────────────
+       Le controforme delle due O si aprono. Due gradienti radiali con i
+       centri sulle O; l'intersezione lascia opaco solo ciò che sta fuori da
+       entrambi i cerchi. Il raggio è scritto da GSAP frame per frame, quindi
+       non serve @property e funziona anche dove non è supportata. */
+    const maskState = { r: 0 };
+    let maskCenters = null;
+    let maskMode = 'dual';
+
+    const supportsDualMask = () => {
+      try {
+        return Boolean(
+          typeof CSS !== 'undefined' &&
+          CSS.supports &&
+          (CSS.supports('mask-composite', 'intersect') ||
+            CSS.supports('-webkit-mask-composite', 'source-in'))
+        );
+      } catch { return false; }
+    };
+
+    const captureCenters = () => {
+      // unica lettura di layout dell'intera sequenza, fatta una volta sola
+      maskCenters = O_SLOTS.map((i) => {
+        const el = dstRefs.current[i] || srcRefs.current[i];
+        const r = el.getBoundingClientRect();
+        return {
+          x: r.left + r.width / 2,
+          y: r.top + r.height / 2,
+          r: Math.max(Math.min(r.width, r.height) * 0.24, 4),
+        };
       });
-    }, containerRef);
+      maskMode = supportsDualMask() ? 'dual' : 'single';
+      return maskCenters;
+    };
 
-    return () => gsapCtx.revert();
-  }, [booting, reducedMotion]);
+    const renderMask = () => {
+      if (!maskCenters) return;
+      const rr = Math.max(maskState.r, 0);
 
-  /* ── Auto-scroll del log box ───────────────────────────────── */
-  useEffect(() => {
-    const el = logsBoxRef.current;
-    if (el) requestAnimationFrame(() => { el.scrollTop = el.scrollHeight; });
-  }, [logs]);
+      if (maskMode === 'single') {
+        /* Ripiego per browser senza mask-composite: un unico gradiente
+           radiale centrato fra le due O. Stessa idea, un buco solo. */
+        const cx = (maskCenters[0].x + maskCenters[1].x) / 2;
+        const cy = (maskCenters[0].y + maskCenters[1].y) / 2;
+        const layer = `radial-gradient(circle at ${cx}px ${cy}px, transparent ${rr}px, #000 ${rr + 0.5}px)`;
+        root.style.webkitMaskImage = layer;
+        root.style.maskImage = layer;
+        return;
+      }
+
+      const layers = maskCenters
+        .map((c) => `radial-gradient(circle at ${c.x}px ${c.y}px, transparent ${rr}px, #000 ${rr + 0.5}px)`)
+        .join(', ');
+      root.style.webkitMaskImage = layers;
+      root.style.maskImage = layers;
+      root.style.webkitMaskComposite = 'source-in';
+      root.style.maskComposite = 'intersect';
+    };
+
+    /* ── SEQUENZA ────────────────────────────────────────────────────────── */
+    const run = () => {
+      measure();
+      applyWord(layoutRef.current.srcW[0]); // la S, sola, già inquadrata
+      renderGrowth();
+
+      if (reduced || seen) {
+        // niente movimento: parola finale, un attimo, e via
+        growth.n = SOURCE.length;
+        renderGrowth();
+        morph.p = 1;
+        renderMorph();
+        word.style.visibility = 'visible';
+        gsap.delayedCall(reduced ? 0.5 : 0.25, () => {
+          gsap.to(root, { opacity: 0, duration: 0.45, ease: E.soft, onComplete: finish });
+        });
+        return;
+      }
+
+      audioRef.current = createAudio();
+
+      const tl = gsap.timeline({ onComplete: finish });
+      tlRef.current = tl;
+
+      /* SCENA 1 — il nero, poi la S. Nessuna transizione: esiste e basta. */
+      tl.call(() => {
+        word.style.visibility = 'visible';
+        audioRef.current?.subHit(46, 1.6, 0.55);
+      }, null, T.blackHold);
+
+      /* SCENA 2 — il respiro: deformazione dell'1%, gomma pesante.
+         Agisce su un wrapper interno per non entrare in conflitto con la
+         matrice di scala/traslazione che governa l'inquadratura. */
+      tl.to('.pl-breath', {
+        scaleX: 1.006,
+        scaleY: 0.994,
+        duration: 1.6,
+        ease: 'sine.inOut',
+        repeat: -1,
+        yoyo: true,
+      }, T.breathIn);
+
+      /* SCENA 3 — la parola cresce dall'interno della S. */
+      tl.to(growth, {
+        n: SOURCE.length,
+        duration: T.growDur,
+        ease: E.grow,
+        onUpdate: renderGrowth,
+      }, T.growStart);
+
+      tl.call(() => audioRef.current?.startDrone(), null, T.growStart + 0.2);
+
+      /* SCENA 4 — stabilizzazione: fermo, solo il respiro. */
+      const morphAt = T.growStart + T.growDur + T.stabilize;
+
+      /* SCENA 5 — il morph verso MOLLO. */
+      tl.to(morph, {
+        p: 1,
+        duration: T.morphDur,
+        ease: E.morph,
+        onUpdate: renderMorph,
+        onStart: () => audioRef.current?.tick(0.14),
+      }, morphAt);
+
+      /* SCENA 6 — le due O si aprono. */
+      tl.call(() => {
+        const pts = captureCenters();
+        maskState.r = pts[0].r;
+        renderMask();
+        root.style.pointerEvents = 'none'; // da qui la homepage è già viva
+        audioRef.current?.subHit(38, 2.2, 0.5);
+        audioRef.current?.stopDrone(0.9);
+      }, null, MASK_AT - 0.05);
+
+      tl.to(maskState, {
+        r: () => Math.hypot(window.innerWidth, window.innerHeight) * 1.05,
+        duration: T.maskDur,
+        ease: E.mask,
+        onUpdate: renderMask,
+      }, MASK_AT);
+
+      /* SCENA 7 — la homepage vive. */
+      tl.call(() => audioRef.current?.braam(), null, MASK_AT + 0.12);
+    };
+
+    /* Il font DEVE essere pronto prima del primo fotogramma: la S non può
+       comparire con un ripiego di sistema e cambiare forma un istante dopo.
+       Oltre 1.8s non si aspetta più: meglio un glifo di ripiego che una
+       pagina nera immobile. */
+    let cancelled = false;
+    const startWhenFontReady = () => {
+      if (cancelled || tlRef.current) return;
+      run();
+    };
+
+    if (typeof document !== 'undefined' && document.fonts && document.fonts.ready) {
+      const guard = window.setTimeout(startWhenFontReady, 1800);
+      document.fonts
+        .load(`900 ${MEASURE_PX}px Outfit`)
+        .catch(() => {})
+        .then(() => document.fonts.ready)
+        .then(() => { window.clearTimeout(guard); startWhenFontReady(); })
+        .catch(() => { window.clearTimeout(guard); startWhenFontReady(); });
+    } else {
+      startWhenFontReady();
+    }
+
+    /* ── SKIP + sblocco audio ──────────────────────────────────────────── */
+    const skip = () => {
+      audioRef.current?.unlock();
+      const tl = tlRef.current;
+      if (!tl) return;
+      if (tl.time() < MASK_AT - 0.05) tl.time(MASK_AT - 0.05, false);
+    };
+    const onKey = (e) => {
+      if (e.key === 'Escape' || e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar') skip();
+    };
+    root.addEventListener('pointerdown', skip);
+    window.addEventListener('keydown', onKey);
+
+    /* Il riquadro cambia (rotazione, resize): ricalcola scala e centri. */
+    const onResize = () => {
+      if (!layoutRef.current) return;
+      if (morph.p > 0) renderMorph(); else renderGrowth();
+    };
+    window.addEventListener('resize', onResize, { passive: true });
+
+    return () => {
+      cancelled = true;
+      root.removeEventListener('pointerdown', skip);
+      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('resize', onResize);
+      tlRef.current?.kill();
+      tlRef.current = null;
+      gsap.killTweensOf([growth, morph, maskState, word, '.pl-breath']);
+      audioRef.current?.dispose();
+      audioRef.current = null;
+    };
+  }, [finish]);
 
   return (
-    <div
-      ref={containerRef}
-      className="uplink-pre"
-      style={{
-        position: 'fixed',
-        top: 0, left: 0,
-        width: '100%',
-        // height gestita da .uplink-pre (100dvh + fallback --real-vh)
-        backgroundColor: T.void,
-        fontFamily: MONO,
-        overflow: 'hidden',
-        clipPath: 'inset(0% 0% 0% 0%)',
-        color: T.bone,
-        touchAction: 'none',
-        overscrollBehavior: 'none',
-        willChange: 'clip-path, opacity',
-        zIndex: 9999,
-      }}
-    >
-      {/* Gate — sblocca l'audio al primo touch */}
-      {!booting && <GateScreen onEnter={handleGateEnter} audioRef={audioRef} />}
-
-      {/* Scena canvas — già viva (idle) dietro il gate */}
-      <MonolithScene energyRef={energyRef} flareRef={flareRef} reduced={reducedMotion} />
-
-      {/* Vignettatura statica — CSS, nessun costo per frame */}
-      <div aria-hidden style={{
-        position: 'absolute', inset: 0, zIndex: 2, pointerEvents: 'none',
-        background: 'radial-gradient(ellipse at 50% 42%, transparent 30%, rgba(0,0,0,0.7) 100%)',
-      }} />
-
-      {/* ── TOP BAR ─────────────────────────────────────────── */}
-      <div style={{
-        position: 'absolute', top: 0, left: 0, right: 0,
-        padding: `1rem ${PX}`,
-        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-        borderBottom: `1px solid ${T.hairline}`,
-        fontSize: 'clamp(0.5rem, 1.1vw, 0.6rem)',
-        color: T.boneDim, letterSpacing: '0.22em', textTransform: 'uppercase',
-        zIndex: 10, gap: '0.75rem',
-      }}>
-        <span style={{
-          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-          minWidth: 0, flexShrink: 1,
-        }}>
-          SM—26 // NEURAL UPLINK
-        </span>
-        <span ref={statusRef} style={{
-          color: T.amber, letterSpacing: '0.14em',
-          whiteSpace: 'nowrap', flexShrink: 0,
-        }}>
-          ● SYNCHRONIZING
-        </span>
-      </div>
-
-      {/* ── PANNELLO INFERIORE: counter + logs ──────────────── */}
-      <div style={{
-        position: 'absolute', left: 0, right: 0, bottom: 0,
-        padding: `0 ${PX} clamp(1.4rem, 4svh, 3rem)`,
-        boxSizing: 'border-box',
-        display: 'flex', flexDirection: 'column',
-        gap: 'clamp(0.9rem, 3svh, 1.6rem)',
-        zIndex: 10,
-      }}>
-
-        <div className="uplink-row" style={{
-          display: 'flex', alignItems: 'flex-end',
-          justifyContent: 'space-between', gap: '1.5rem',
-        }}>
-          {/* Counter — tipografia cinetica massiccia, mascherata */}
-          <div style={{ flexShrink: 0, minWidth: 0 }}>
-            <div ref={phaseRef} style={{
-              fontSize: 'clamp(0.46rem, 1vw, 0.58rem)',
-              color: T.amber, letterSpacing: '0.34em', textTransform: 'uppercase',
-              marginBottom: '0.7rem',
-            }}>
-              HANDSHAKE
-            </div>
-            <div style={{ overflow: 'hidden' /* maschera per l'exit slide-up */ }}>
-              <div ref={counterMaskRef} style={{
-                display: 'flex', alignItems: 'baseline',
-                willChange: 'transform',
-              }}>
-                <span ref={numRef} style={{
-                  fontSize: 'clamp(4rem, 16vw, 11rem)',
-                  fontWeight: 300, lineHeight: 0.88,
-                  color: T.bone, letterSpacing: '-0.05em',
-                  fontVariantNumeric: 'tabular-nums',
-                  willChange: 'contents',
-                }}>
-                  000
+    <div ref={rootRef} className="pl-root" role="presentation">
+      <div className="pl-stage">
+        <div ref={wordRef} className="pl-word">
+          <div className="pl-breath">
+            {SOURCE.split('').map((ch, i) => (
+              <span
+                key={i}
+                className="pl-slot"
+                ref={(el) => { slotRefs.current[i] = el; }}
+              >
+                <span
+                  className="pl-glyph"
+                  ref={(el) => { srcRefs.current[i] = el; }}
+                >
+                  {ch}
                 </span>
-                <span style={{
-                  fontSize: 'clamp(0.9rem, 2.4vw, 1.6rem)',
-                  color: T.amber, marginLeft: '0.5rem', fontWeight: 300,
-                }}>
-                  %
-                </span>
-              </div>
-            </div>
-          </div>
 
-          {/* Log box — micro-tipografia, decode reveal */}
-          <div
-            ref={logsBoxRef}
-            style={{
-              flex: '0 1 380px', minWidth: 0,
-              height: 'clamp(96px, 20svh, 168px)',
-              overflow: 'hidden',
-              display: 'flex', flexDirection: 'column', justifyContent: 'flex-end',
-              gap: '0.42rem',
-              fontSize: 'clamp(0.5rem, 1.05vw, 0.66rem)',
-              lineHeight: 1.5, letterSpacing: '0.08em',
-              textTransform: 'uppercase',
-              borderLeft: `1px solid ${T.hairline}`,
-              paddingLeft: 'clamp(0.7rem, 2vw, 1.2rem)',
-              boxSizing: 'border-box',
-            }}
-          >
-            {logs.map((log, i) => (
-              <DecodeLine key={i} text={log.text} accent={log.accent} onReveal={onLogReveal} />
+                {MORPH_MAP[i] ? (
+                  <span
+                    className="pl-glyph pl-glyph-dst"
+                    ref={(el) => { dstRefs.current[i] = el; }}
+                  >
+                    {MORPH_MAP[i]}
+                  </span>
+                ) : null}
+              </span>
             ))}
           </div>
         </div>
-
-        {/* Progress hairline — scaleX, GPU-only */}
-        <div style={{
-          width: '100%', height: '1px',
-          background: T.hairline, position: 'relative', overflow: 'hidden',
-        }}>
-          <div
-            ref={fillRef}
-            style={{
-              position: 'absolute', inset: 0,
-              background: T.bone,
-              transform: 'scaleX(0)',
-              transformOrigin: 'left center',
-              willChange: 'transform',
-            }}
-          />
-        </div>
-
-        {/* Footer micro-dati — nascosto su mobile */}
-        <div className="hide-mobile" style={{
-          display: 'flex', justifyContent: 'space-between',
-          fontSize: '0.52rem', color: T.boneGhost,
-          letterSpacing: '0.24em', textTransform: 'uppercase',
-        }}>
-          <span>NODE 45.0703°N / 7.6869°E</span>
-          <span>AES-256-GCM — CHANNEL SEALED</span>
-          <span>SM © 2026</span>
-        </div>
       </div>
 
+      {/* Il nome resta leggibile dagli screen reader anche se visivamente
+          è una sequenza di glifi in trasformazione. */}
+      <span className="pl-sr">Sebastiano Mollo</span>
+
       <style>{`
-        /* ── VIEWPORT HEIGHT ──────────────────────────────────
-           100dvh segue la URL bar di iOS Safari (15.4+).
-           Fallback: --real-vh calcolata via JS per i legacy. */
-        .uplink-pre { height: 100svh; }
-        @supports not (height: 1svh) {
-          .uplink-pre { height: var(--real-vh, 100svh); }
+        .pl-root {
+          position: fixed;
+          top: 0; left: 0;
+          width: 100%;
+          height: 100%;
+          z-index: 9999;
+          background: #000000;
+          overflow: hidden;
+          /* nessun bordo, nessuna ombra, nessuna texture: solo nero */
         }
 
-        /* ── MOBILE COLLAPSE ──────────────────────────────────
-           Sotto i 768px la riga counter/logs si impila:
-           counter sopra, log sotto a piena larghezza.        */
-        @media (max-width: 767px) {
-          .hide-mobile { display: none !important; }
-          .uplink-row {
-            flex-direction: column !important;
-            align-items: stretch !important;
-            gap: 1rem !important;
-          }
-          .uplink-row > div:last-child {
-            flex: 0 0 auto !important;
-            height: clamp(80px, 16svh, 120px) !important;
-            border-left: none !important;
-            border-top: 1px solid ${T.hairline} !important;
-            padding-left: 0 !important;
-            padding-top: 0.8rem !important;
-          }
+        .pl-stage {
+          position: absolute;
+          top: 50%;
+          left: 50%;
+          width: 0;
+          height: 0;
+        }
+
+        .pl-word {
+          position: absolute;
+          top: 0;
+          left: 0;
+          transform-origin: 0% 50%;
+          visibility: hidden;      /* la S non esiste prima del suo istante */
+          white-space: nowrap;
+          will-change: transform;
+        }
+
+        /* wrapper del respiro: separato dalla matrice di inquadratura,
+           così le due animazioni non si sovrascrivono a vicenda */
+        .pl-breath {
+          position: absolute;
+          top: 0; left: 0;
+          width: 100%; height: 100%;
+          transform-origin: 0% 50%;
+        }
+
+        .pl-slot {
+          position: absolute;
+          top: 0;
+          left: 0;
+          display: block;
+          transform-origin: 0% 50%;
+          will-change: transform;
+        }
+
+        .pl-glyph {
+          display: block;
+          font-family: ${TYPE_STACK};
+          font-weight: 900;
+          font-size: ${MEASURE_PX}px;
+          line-height: 1;
+          letter-spacing: 0;
+          color: #FFFFFF;
+          white-space: pre;
+          /* la crenatura la calcoliamo noi: il font non deve intromettersi */
+          font-kerning: none;
+          font-variant-ligatures: none;
+          -webkit-font-smoothing: antialiased;
+        }
+
+        /* la forma d'arrivo sta esattamente sopra quella di partenza:
+           stessa scatola, stesso baseline, nessuno scarto */
+        .pl-glyph-dst {
+          position: absolute;
+          top: 0;
+          left: 0;
+          clip-path: inset(0% 0% 100% 0%);
+        }
+
+        .pl-sr {
+          position: absolute;
+          width: 1px; height: 1px;
+          margin: -1px;
+          padding: 0;
+          overflow: hidden;
+          clip-path: inset(50%);
+          white-space: nowrap;
+          border: 0;
         }
       `}</style>
     </div>
