@@ -129,18 +129,23 @@ const TERM = '#4AF626'; // accento verde terminale — SOLO per il readout RUNTI
    onLoad. Finché mancano, ogni slot mostra lo stato "pending" e
    tiene lo spazio riservato (nessun salto di layout all'arrivo).
 
-   cover.jpg              → card archivio /works — 1600×1000 (16:10),
-                            JPG qualità ~80, ≤ 300 KB
-   og-cover.jpg           → anteprima social (seo.config.js) —
-                            1200×630, SOLO JPG/PNG, ≤ 300 KB
-   gameplay-01.mp4        → clip hero — 16:9, H.264 + AAC (o muto),
-                            1920×1080, 10–20 s, ≤ 6 MB
-   poster-gameplay-01.jpg → poster della clip hero — 1920×1080, ≤ 250 KB
-   gameplay-02.mp4        → clip boss / livello 3 — 16:9, H.264, ≤ 6 MB
-   poster-gameplay-02.jpg → poster della clip boss — 1920×1080
-   screenshot-01.webp     → livello 1 — 1920×1080 (16:9), ≤ 400 KB
-   screenshot-02.webp     → livello 2 — 1920×1080 (16:9), ≤ 400 KB
-   screenshot-03.webp     → negozio / HUD — 1920×1080 (16:9), ≤ 400 KB
+   TUTTI i media rispettano il rapporto NATIVO della finestra di gioco
+   (640 × 428 → 1280 × 856, upscale 2× nearest-neighbor per non
+   impastare i pixel). Gli slot usano lo stesso rapporto, quindi
+   object-fit: cover non croppa NULLA.
+
+   cover.jpg              → card archivio /works — 1600×1000 (16:10)
+   og-cover.jpg           → anteprima social (seo.config.js) — 1200×630
+   gameplay-01.mp4        → clip hero — 1280×856, H.264 main, muto,
+                            faststart, ~5 MB
+   poster-gameplay-01.jpg → poster della clip hero — 1280×856
+   gameplay-02.mp4        → clip boss / livello 3 — 1280×856, ~6 MB
+   poster-gameplay-02.jpg → poster della clip boss — 1280×856
+   screenshot-01.webp     → livello 1 — 1280×856
+   screenshot-02.webp     → livello 2 — 1280×856
+   screenshot-03.webp     → negozio / HUD — 1280×856 (ANCORA MANCANTE:
+                            lo slot resta in stato pending finché non
+                            registri una clip che mostra il negozio)
 
    NOTA H.264: usare profile "baseline" o "main" (non "high 4:4:4")
    e faststart (moov atom all'inizio) — è ciò che rende la clip
@@ -163,7 +168,7 @@ const TILEMAP = [
   '1000000000000011111110000000011110006040',
   '1000110000000000000000000000000100001111',
   '1000000000060600002000030000000030000000',
-  '100001020003110000000460000 ò0000001111111',
+  '1000010200031100000004600000000001111111',
   '1000000000060000001111111131320000006000',
   '1000011111131130000000000000000000000111',
   '1000000000060000040000600060600060000000',
@@ -744,8 +749,11 @@ const CSS = `
     box-shadow: inset 0 1px 1px rgba(232,227,216,0.07);
   }
   /* Fallback per browser senza aspect-ratio: lo spazio resta riservato */
-  @supports not (aspect-ratio: 16 / 9) {
-    .ce-slot-core { height: 0; padding-bottom: 56.25%; }
+  @supports not (aspect-ratio: 640 / 428) {
+    /* 428 / 640 = 66.875% — stesso rapporto della finestra di gioco,
+       così anche i browser senza aspect-ratio riservano lo spazio esatto
+       e il video non viene mai croppato da object-fit: cover. */
+    .ce-slot-core { height: 0; padding-bottom: 66.875%; }
     .ce-slot-core.is-portrait { padding-bottom: 125%; }
   }
   .ce-slot-media {
@@ -1199,7 +1207,7 @@ function Pending({ children }) {
      Save-Data o reduced-motion, e ogni Promise è protetta da un
      flag `alive` così non si aggiorna lo stato dopo lo smontaggio.
 ═══════════════════════════════════════════════════════════════ */
-function MediaSlot({ kind = 'image', src, poster, alt, label, meta, ratio = '16 / 9', portrait = false }) {
+function MediaSlot({ kind = 'image', src, poster, alt, label, meta, ratio = '640 / 428', portrait = false }) {
   const [ready, setReady]     = useState(false);
   const [failed, setFailed]   = useState(false);
   const [needsTap, setNeedsTap] = useState(() => {
@@ -1216,8 +1224,20 @@ function MediaSlot({ kind = 'image', src, poster, alt, label, meta, ratio = '16 
   const videoRef = useRef(null);
   const coreRef  = useRef(null);
 
+  /* iOS Safari NON imposta la proprietà `muted` dal solo attributo JSX in
+     tutti i casi, e un video non realmente muto non ha diritto all'autoplay:
+     lo forziamo sull'elemento DOM appena esiste. */
   useEffect(() => {
-    if (kind !== 'video' || !ready || needsTap || failed) return undefined;
+    const video = videoRef.current;
+    if (kind === 'video' && video) video.muted = true;
+  }, [kind]);
+
+  /* Governo del playback. NON dipende da `ready`: su iOS con
+     preload="metadata" l'evento che segnala "pronto" può non arrivare
+     finché la riproduzione non è già iniziata — legarlo a ready creava
+     uno stallo (niente play ⇒ niente evento ⇒ niente play). */
+  useEffect(() => {
+    if (kind !== 'video' || needsTap || failed) return undefined;
     const video = videoRef.current;
     const core  = coreRef.current;
     if (!video || !core || typeof IntersectionObserver === 'undefined') return undefined;
@@ -1230,6 +1250,8 @@ function MediaSlot({ kind = 'image', src, poster, alt, label, meta, ratio = '16 
         if (entry.isIntersecting) {
           const p = video.play();
           if (p && typeof p.catch === 'function') {
+            // Autoplay negato (risparmio energetico iOS, policy del browser):
+            // si passa al bottone di play esplicito invece di restare al buio.
             p.catch(() => { if (alive) setNeedsTap(true); });
           }
         } else {
@@ -1245,7 +1267,12 @@ function MediaSlot({ kind = 'image', src, poster, alt, label, meta, ratio = '16 
       io.disconnect();
       try { video.pause(); } catch { /* elemento già rimosso */ }
     };
-  }, [kind, ready, needsTap, failed]);
+  }, [kind, needsTap, failed]);
+
+  const handleReady = useCallback(() => {
+    setFailed(false);
+    setReady(true);
+  }, []);
 
   const handleTap = useCallback(() => {
     const video = videoRef.current;
@@ -1293,9 +1320,17 @@ function MediaSlot({ kind = 'image', src, poster, alt, label, meta, ratio = '16 
               muted
               loop
               playsInline
+              /* Safari iOS vuole ANCHE l'attributo in kebab-case */
+              webkit-playsinline="true"
               preload="metadata"
               aria-label={alt}
-              onLoadedData={() => { setFailed(false); setReady(true); }}
+              /* Tre eventi invece di uno: `loadeddata` da solo non arriva
+                 mai su iOS finché il video non parte. `loadedmetadata` è
+                 il primo che arriva ovunque, `canplay` copre i browser che
+                 saltano gli altri due. Il primo che scatta vince. */
+              onLoadedMetadata={handleReady}
+              onLoadedData={handleReady}
+              onCanPlay={handleReady}
               onError={() => { setFailed(true); setReady(false); }}
             />
           ) : (
@@ -1305,12 +1340,15 @@ function MediaSlot({ kind = 'image', src, poster, alt, label, meta, ratio = '16 
               alt={alt}
               loading="lazy"
               decoding="async"
-              onLoad={() => { setFailed(false); setReady(true); }}
+              onLoad={handleReady}
               onError={() => { setFailed(true); setReady(false); }}
             />
           )}
 
-          {kind === 'video' && ready && !failed && needsTap && (
+          {/* Il bottone NON dipende più da `ready`: se l'autoplay viene
+              negato prima che il video si dichiari pronto, l'utente deve
+              comunque avere un modo per farlo partire. */}
+          {kind === 'video' && !failed && needsTap && (
             <button type="button" className="ce-play" onClick={handleTap} aria-label="Riproduci la clip di gameplay">
               <span className="ce-play-orb">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill={T.bone} aria-hidden="true">
@@ -1725,8 +1763,8 @@ export default function CGameEngine() {
               poster={`${ASSET_DIR}/poster-gameplay-01.jpg`}
               alt="Clip di gameplay di Forge Engine: il player attraversa un livello a tile del platformer 2D, raccoglie monete e schiva i nemici"
               label="OUTPUT // GAMEPLAY-01"
-              meta="CH-01 · 16:9 · CAPTURE"
-              ratio="16 / 9"
+              meta="CH-01 · 1280×856 · CAPTURE"
+              ratio="640 / 428"
             />
           </div>
         </section>
@@ -1907,44 +1945,44 @@ export default function CGameEngine() {
               <MediaSlot
                 kind="video"
                 src={`${ASSET_DIR}/gameplay-02.mp4`}
-                poster={`${ASSET_DIR}/immagineBoss.jpg`}
+                poster={`${ASSET_DIR}/poster-gameplay-02.jpg`}
                 alt="Clip dello scontro finale di Forge Engine: il player affronta il boss nel terzo livello"
                 label="CAPTURE // BOSS-FIGHT"
-                meta="CH-02 · 16:9 · VIDEO"
-                ratio="16 / 9"
+                meta="CH-02 · 1280×856 · VIDEO"
+                ratio="640 / 428"
               />
             </div>
 
             <div className="ce-reveal">
               <MediaSlot
                 kind="image"
-                src={`${ASSET_DIR}/immaginePrimoLivello.jpg`}
+                src={`${ASSET_DIR}/screenshot-01.webp`}
                 alt="Screenshot del primo livello di Forge Engine: piattaforme, casse distruttibili e monete da raccogliere"
                 label="FRAME // LIVELLO-01"
-                meta="CH-03 · 16:9 · STILL"
-                ratio="16 / 9"
+                meta="CH-03 · 1280×856 · STILL"
+                ratio="640 / 428"
               />
             </div>
 
             <div className="ce-reveal">
               <MediaSlot
                 kind="image"
-                src={`${ASSET_DIR}/immagineSecondoLivello.jpg`}
+                src={`${ASSET_DIR}/immagineBoss.jpg`}
                 alt="Screenshot del secondo livello di Forge Engine: nuovo tileset e torrette ostili lungo il percorso"
                 label="FRAME // LIVELLO-02"
-                meta="CH-04 · 16:9 · STILL"
-                ratio="16 / 9"
+                meta="CH-04 · 1280×856 · STILL"
+                ratio="640 / 428"
               />
             </div>
 
             <div className="ce-gal-wide ce-reveal">
               <MediaSlot
                 kind="image"
-                src={`${ASSET_DIR}/immagineNegozio .jpg`}
+                src={`${ASSET_DIR}/immagineNegozio.jpg`}
                 alt="Screenshot del negozio di Forge Engine: gli oggetti acquistabili con le monete raccolte e il saldo del giocatore"
                 label="FRAME // NEGOZIO"
-                meta="CH-05 · 16:9 · UI"
-                ratio="16 / 9"
+                meta="CH-05 · 1280×856 · UI"
+                ratio="640 / 428"
               />
             </div>
           </div>
