@@ -17,28 +17,49 @@ import gsap from 'gsap';
      4 · EXIT       Il logo esplode in particelle, il fondo si dissolve
                     e l'Hero del sito emerge senza stacco.
 
-   Audio    : sintesi procedurale pura (zero asset). Catena master
-              bus → glue(tanh) → brickwall limiter → master.
-              Ambience CRT + hum elettrico + drone sub-bass stereo +
-              interferenze, tick aptici, data-burst, riser, braam.
+   ─────────────────────────────────────────────────────────────────
+   ARCHITETTURA DEL TEMPO (la chiave della sincronia audio/video)
+   ─────────────────────────────────────────────────────────────────
+   Esiste UN SOLO orologio: la "show clock", avanzata dal rAF del
+   canvas con delta-time CLAMPATO. Tutta la coreografia (audio, fasi,
+   tween DOM) è una coda di eventi ordinata letta su quella stessa
+   clock, nello stesso frame in cui il canvas disegna.
+
+   Conseguenze, tutte volute:
+   • Un evento audio e il fotogramma che gli corrisponde partono nello
+     STESSO frame → sincronia esatta per costruzione, non per fortuna.
+   • Se la tab va in background il rAF si ferma: la clock si congela e
+     NESSUN evento si accumula. Al ritorno lo show riparte esattamente
+     da dov'era. (Con gsap.delayedCall + ticker.lagSmoothing(0) — che
+     main.jsx imposta — al ritorno sarebbero scattati TUTTI insieme:
+     braam, glitch e data-burst sovrapposti. Bug reale, eliminato.)
+   • L'AudioContext viene sospeso/ripreso con la visibilità, quindi
+     nemmeno il drone va alla deriva rispetto al video.
 
    Performance:
-   - UN solo canvas 2D, UN solo rAF, ZERO allocazioni nel draw loop.
-   - Atlante di glifi pre-renderizzato: drawImage invece di fillText
-     (≈4× più veloce, niente re-shaping del testo per frame).
-   - Tutte le particelle in Float32Array pre-allocati.
-   - Quality Governor adattivo a 3 tier sul frame-time medio.
+   - UN canvas 2D, UN rAF, UNA clock, ZERO allocazioni nel draw loop.
+   - Atlante di glifi pre-renderizzato con coordinate sorgente già in
+     pixel-device: drawImage senza shaping né moltiplicazioni per frame.
+   - Particelle disegnate in BATCH per livello di alpha: ~12 draw call
+     invece di ~5200 (una fillRect per particella spezza il batching
+     di Skia a ogni cambio di globalAlpha).
+   - Scia troncata con `break` appena esce dallo schermo, alpha testata
+     PRIMA della matematica del campo magnetico.
+   - Quality Governor adattivo, ma congelato dopo la fase RAIN: un
+     cambio di tier durante la genesi rimapperebbe i target del logo.
+   - Buffer audio pre-generati: nessuna allocazione durante il typing.
    - Fuori dal canvas si animano SOLO transform e opacity.
-   - Cleanup chirurgico: rAF, timer, observer, listener, nodi audio.
 
-   COMPATIBILITÀ SITO (preservata dal file precedente):
+   COMPATIBILITÀ SITO (preservata):
    - lock scroll su <body> con SALVATAGGIO/RIPRISTINO esatto degli
      stili precedenti → la barra di scorrimento destra e lo scroll di
      TUTTO il sito tornano attivi appena il preloader si smonta.
    - fallback --real-vh per Safari iOS legacy.
    - pointer-events disattivati all'inizio dell'exit → il sito sotto
      è già interattivo mentre il preloader svanisce.
-   - window.audioCtx condiviso: NON viene chiuso al dismount.
+   - window.audioCtx condiviso: NON viene chiuso al dismount, e la
+     catena master viene MEMOIZZATA sul contesto (un remount non ne
+     costruisce una seconda che raddoppierebbe il volume).
    - listener puntatore/touch tutti PASSIVI: nessuna trappola sul
      touchmove, il compositor scroll del sito resta intatto.
 ════════════════════════════════════════════════════════════════════ */
@@ -89,7 +110,7 @@ const GLYPH_WORD = [
 ];
 const GLYPHS  = [...GLYPH_SHORT, ...GLYPH_WORD];
 const SHORT_N = GLYPH_SHORT.length;
-const TOTAL_N = GLYPHS.length;
+const TOTAL_N = GLYPHS.length; // 74 < 256 → gli id stanno in un Uint8Array
 
 /* Picker pesato: la colonna resta "tecnica" e leggibile, le parole
    compaiono come segnali rari dentro il flusso di dati. */
@@ -116,21 +137,37 @@ const QUALITY_TIERS = [
 const FRAME_WINDOW = 90;
 const FRAME_BUDGET = 19;
 
-/* Durate della coreografia (secondi) */
+/* Livelli di quantizzazione dell'alpha per il batching delle
+   particelle. 8 livelli sul corpo + 4 sul nucleo = 12 draw call
+   totali; la scalinatura è invisibile perché le particelle sono
+   sovrapposte in blending additivo. */
+const A_LEVELS = 8;
+const C_LEVELS = 4;
+
+/* Durate della coreografia (secondi di show-clock) */
 const D = {
   boot:     3.0,
   rain:     2.9,
   converge: 2.05,
-  reveal:   3.1 ,
+  // `reveal` copre l'ingresso della tagline (≈1.55s dall'inizio della
+  // fase) PIÙ il tempo di contemplazione. Il respiro del logo continua,
+  // quindi la pausa non è mai statica: è un fermo-immagine vivo.
+  reveal:   3.1,
   exit:     1.35,
 };
 const D_REDUCED = {
   boot:     1.0,
   rain:     0.0,
   converge: 0.7,
-  reveal:   0.9,
+  reveal:   1.9,
   exit:     0.7,
 };
+
+/* Clamp del delta-time. Oltre questa soglia il frame è considerato
+   "perso" (GC, tab in background, long task) e la show-clock avanza
+   solo del clamp: nessun salto, nessuna raffica di eventi accumulati. */
+const DT_CLAMP         = 0.05;  // 20fps: sotto, lo show rallenta invece di saltare
+const DT_CLAMP_REDUCED = 0.20;  // profilo reduced-motion: polling a 120ms
 
 
 /* ═══════════════════════════════════════════════════════════════
@@ -155,12 +192,13 @@ const clamp01      = v => (v < 0 ? 0 : v > 1 ? 1 : v);
                threshold −1.5dBFS, knee 0, ratio 20:1, attack 2ms.
                Tiene i picchi sotto 0dBFS: forte ma mai sgradevole.
 
-   API: init · startAmbience · stopAmbience · setIntensity · startDrone
-        stopDrone · boot · tick · beep · glitch · dataBurst · sweep
-        braam · destroy · ok
+   La catena è MEMOIZZATA sull'AudioContext condiviso: un remount del
+   preloader (HMR, StrictMode, route) riusa quella esistente invece di
+   costruirne una seconda in parallelo — che raddoppierebbe il volume
+   e lascerebbe nodi orfani attaccati a destination.
 ═══════════════════════════════════════════════════════════════ */
 
-/* Curve di saturazione pre-calcolate (tanh): niente Math nel grafo audio. */
+/* Curve di saturazione pre-calcolate (tanh): niente Math nel grafo. */
 function buildSatCurve(drive, n = 2048) {
   const c = new Float32Array(n);
   for (let i = 0; i < n; i++) {
@@ -173,28 +211,63 @@ const SAT_WARM  = buildSatCurve(2.6); // ottoni del braam: caldo, "a valvole"
 const SAT_GLUE  = buildSatCurve(1.1); // bus: collante quasi trasparente
 const SAT_CRUSH = buildSatCurve(9.0); // glitch: distorsione dura
 
-function createAudioEngine() {
-  let ctx      = null;
-  let bus      = null;
-  let limiter  = null;
-  let master   = null;
-  let drone    = null;
-  let amb      = null;
-  let noiseBuf = null;
+/* Lookahead di scheduling. Far partire una sorgente esattamente a
+   ctx.currentTime significa cadere a metà del blocco da 128 sample in
+   corso: il transiente viene troncato e si sente un click irregolare.
+   6ms di anticipo garantiscono un attacco pulito e IDENTICO ogni volta
+   — è precisione, non latenza (impercettibile). */
+const LOOK = 0.006;
 
-  // iOS impiega qualche ms per passare a 'running': non controlliamo
-  // lo stato, solo che il contesto e la catena esistano.
+function createAudioEngine() {
+  let ctx     = null;
+  let bus     = null;
+  let limiter = null;
+  let master  = null;
+  let drone   = null;
+  let amb     = null;
+
+  /* Buffer pre-generati UNA volta: durante il typing partono decine di
+     tick e allocare/riempire un AudioBuffer per ognuno produrrebbe
+     garbage a raffica proprio mentre il canvas deve tenere i 60fps. */
+  let bufNoise   = null;  // 2s di rumore bianco, in loop
+  let bufTick    = null;  // 6ms, click della tastiera
+  let bufImpact  = null;  // 50ms, transiente del braam
+  let bufGlitch  = null;  // 3 varianti da 90ms, interferenza
+
   const ok = () => ctx !== null && bus !== null;
 
-  /* Buffer di rumore bianco da 2s, generato UNA volta e riusato da
-     tutte le sorgenti (loop d'ambiente e burst percussivi). */
-  function noise() {
-    if (noiseBuf) return noiseBuf;
-    const len = Math.floor(ctx.sampleRate * 2);
-    noiseBuf = ctx.createBuffer(1, len, ctx.sampleRate);
-    const d = noiseBuf.getChannelData(0);
-    for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
-    return noiseBuf;
+  function buildBuffers() {
+    const sr = ctx.sampleRate;
+
+    const nLen = Math.floor(sr * 2);
+    bufNoise = ctx.createBuffer(1, nLen, sr);
+    const nd = bufNoise.getChannelData(0);
+    for (let i = 0; i < nLen; i++) nd[i] = Math.random() * 2 - 1;
+
+    const tLen = Math.floor(sr * 0.006);
+    bufTick = ctx.createBuffer(1, tLen, sr);
+    const td = bufTick.getChannelData(0);
+    for (let i = 0; i < tLen; i++)
+      td[i] = (Math.random() * 2 - 1) * Math.exp(-i / (tLen * 0.06));
+
+    const iLen = Math.floor(sr * 0.05);
+    bufImpact = ctx.createBuffer(1, iLen, sr);
+    const id = bufImpact.getChannelData(0);
+    for (let i = 0; i < iLen; i++)
+      id[i] = (Math.random() * 2 - 1) * Math.exp(-i / (iLen * 0.12));
+
+    const gLen = Math.floor(sr * 0.09);
+    bufGlitch = [];
+    for (let v = 0; v < 3; v++) {
+      const b = ctx.createBuffer(1, gLen, sr);
+      const d = b.getChannelData(0);
+      let hold = 0;
+      for (let i = 0; i < gLen; i++) {
+        if (i % (5 + v * 2) === 0) hold = Math.random() * 2 - 1; // bit-crush
+        d[i] = hold * (1 - i / gLen);
+      }
+      bufGlitch.push(b);
+    }
   }
 
   function init() {
@@ -212,7 +285,14 @@ function createAudioEngine() {
       unlock.start(0);
       if (ctx.state !== 'running') ctx.resume().catch(() => {});
 
-      if (master) return; // la catena master si costruisce una volta sola
+      // Catena già costruita da un mount precedente: la riuso.
+      if (ctx.__ghostChain) {
+        const c = ctx.__ghostChain;
+        bus = c.bus; limiter = c.limiter; master = c.master;
+        bufNoise = c.bufNoise; bufTick = c.bufTick;
+        bufImpact = c.bufImpact; bufGlitch = c.bufGlitch;
+        return;
+      }
 
       bus = ctx.createGain();
       bus.gain.value = 1.0;
@@ -235,9 +315,23 @@ function createAudioEngine() {
       glue.connect(limiter);
       limiter.connect(master);
       master.connect(ctx.destination);
+
+      buildBuffers();
+
+      ctx.__ghostChain = { bus, limiter, master, bufNoise, bufTick, bufImpact, bufGlitch };
     } catch {
       ctx = null; bus = null; limiter = null; master = null;
     }
+  }
+
+  /* Sospensione/ripresa legate alla visibilità della tab: l'audio si
+     congela insieme alla show-clock, quindi al ritorno non c'è deriva
+     tra ciò che si sente e ciò che si vede (e la batteria ringrazia). */
+  function suspend() {
+    if (ctx && ctx.state === 'running') ctx.suspend().catch(() => {});
+  }
+  function resume() {
+    if (ctx && ctx.state === 'suspended') ctx.resume().catch(() => {});
   }
 
   /* ── AMBIENCE — il respiro del monitor CRT ─────────────────────
@@ -252,7 +346,7 @@ function createAudioEngine() {
     const now = ctx.currentTime;
 
     const src = ctx.createBufferSource();
-    src.buffer = noise();
+    src.buffer = bufNoise;
     src.loop = true;
 
     const hp = ctx.createBiquadFilter();
@@ -319,18 +413,20 @@ function createAudioEngine() {
     if (!ctx || !amb) return;
     const now = ctx.currentTime;
     const stopAt = now + fade + 0.08;
-    amb.nGain.gain.cancelScheduledValues(now);
-    amb.nGain.gain.setValueAtTime(Math.max(amb.nGain.gain.value, 0.0001), now);
-    amb.nGain.gain.exponentialRampToValueAtTime(0.0001, now + fade);
-    amb.gains.forEach(g => {
+    const a = amb;
+    amb = null; // subito, così una seconda chiamata non ri-schedula
+
+    a.nGain.gain.cancelScheduledValues(now);
+    a.nGain.gain.setValueAtTime(Math.max(a.nGain.gain.value, 0.0001), now);
+    a.nGain.gain.exponentialRampToValueAtTime(0.0001, now + fade);
+    a.gains.forEach(g => {
       g.gain.cancelScheduledValues(now);
       g.gain.setValueAtTime(Math.max(g.gain.value, 0.0001), now);
       g.gain.exponentialRampToValueAtTime(0.0001, now + fade);
     });
-    try { amb.src.stop(stopAt); }  catch { /* già fermato */ }
-    try { amb.trem.stop(stopAt); } catch { /* già fermato */ }
-    amb.oscs.forEach(o => { try { o.stop(stopAt); } catch { /* già fermato */ } });
-    amb = null;
+    try { a.src.stop(stopAt); }  catch { /* già fermato */ }
+    try { a.trem.stop(stopAt); } catch { /* già fermato */ }
+    a.oscs.forEach(o => { try { o.stop(stopAt); } catch { /* già fermato */ } });
   }
 
   /* ── DRONE — sub-bass stereo detunato: la minaccia sotto la scena ──
@@ -406,22 +502,24 @@ function createAudioEngine() {
   function stopDrone(fade = 1.0) {
     if (!ctx || !drone) return;
     const now = ctx.currentTime;
-    drone.gain.gain.cancelScheduledValues(now);
-    drone.gain.gain.setValueAtTime(Math.max(drone.gain.gain.value, 0.0001), now);
-    drone.gain.gain.exponentialRampToValueAtTime(0.0001, now + fade);
+    const d = drone;
+    drone = null; // subito: stopDrone è idempotente
+
+    d.gain.gain.cancelScheduledValues(now);
+    d.gain.gain.setValueAtTime(Math.max(d.gain.gain.value, 0.0001), now);
+    d.gain.gain.exponentialRampToValueAtTime(0.0001, now + fade);
     const stopAt = now + fade + 0.1;
-    drone.oscs.forEach(o => { try { o.stop(stopAt); } catch { /* già fermato */ } });
-    try { drone.lfo.stop(stopAt); } catch { /* già fermato */ }
-    drone = null;
+    d.oscs.forEach(o => { try { o.stop(stopAt); } catch { /* già fermato */ } });
+    try { d.lfo.stop(stopAt); } catch { /* già fermato */ }
   }
 
   /* ── BOOT — accensione: whoosh filtrato + accordo grave che sale ── */
   function boot() {
     if (!ok()) return;
-    const now = ctx.currentTime;
+    const now = ctx.currentTime + LOOK;
 
     const src = ctx.createBufferSource();
-    src.buffer = noise();
+    src.buffer = bufNoise;
     const bp = ctx.createBiquadFilter();
     bp.type = 'bandpass';
     bp.Q.value = 0.9;
@@ -449,33 +547,28 @@ function createAudioEngine() {
   }
 
   /* ── TICK — click aptico secco e digitale (tastiera del terminale) ──
-     Burst di rumore da 6ms dentro un bandpass stretto a frequenza
-     randomizzata: mai due tick identici, buca il mix senza stancare. */
+     Buffer pre-generato, variazione affidata alla frequenza casuale di
+     un bandpass stretto: mai due tick identici, zero allocazioni. */
   function tick(vol = 0.22) {
     if (!ok()) return;
-    const now = ctx.currentTime;
-    const len = Math.floor(ctx.sampleRate * 0.006);
-    const buf = ctx.createBuffer(1, len, ctx.sampleRate);
-    const d   = buf.getChannelData(0);
-    for (let i = 0; i < len; i++)
-      d[i] = (Math.random() * 2 - 1) * Math.exp(-i / (len * 0.06));
+    const now = ctx.currentTime + LOOK;
     const src = ctx.createBufferSource();
     const bp  = ctx.createBiquadFilter();
     const g   = ctx.createGain();
-    src.buffer = buf;
+    src.buffer = bufTick;
     bp.type = 'bandpass';
     bp.frequency.value = 2600 + Math.random() * 1800;
     bp.Q.value = 2.2;
     g.gain.setValueAtTime(vol, now);
     g.gain.exponentialRampToValueAtTime(0.0001, now + 0.04);
     src.connect(bp); bp.connect(g); g.connect(bus);
-    src.start(now);
+    src.start(now); src.stop(now + 0.05);
   }
 
   /* ── BEEP — micro-pulsazione sintetica, sonar di sistema ── */
   function beep(freq = 1480, vol = 0.055, dur = 0.09) {
     if (!ok()) return;
-    const now = ctx.currentTime;
+    const now = ctx.currentTime + LOOK;
     const osc = ctx.createOscillator();
     const g   = ctx.createGain();
     osc.type = 'sine';
@@ -488,23 +581,16 @@ function createAudioEngine() {
     osc.start(now); osc.stop(now + dur + 0.02);
   }
 
-  /* ── GLITCH — interferenza digitale: sample&hold crushato + sweep ── */
+  /* ── GLITCH — interferenza digitale: 1 delle 3 varianti crushate,
+     bandpass a frequenza e direzione casuali ── */
   function glitch(vol = 0.13) {
     if (!ok()) return;
-    const now = ctx.currentTime;
-    const len = Math.floor(ctx.sampleRate * 0.09);
-    const buf = ctx.createBuffer(1, len, ctx.sampleRate);
-    const d   = buf.getChannelData(0);
-    let hold = 0;
-    for (let i = 0; i < len; i++) {
-      if (i % 7 === 0) hold = Math.random() * 2 - 1; // bit-crush grezzo
-      d[i] = hold * (1 - i / len);
-    }
+    const now = ctx.currentTime + LOOK;
     const src = ctx.createBufferSource();
     const ws  = ctx.createWaveShaper();
     const bp  = ctx.createBiquadFilter();
     const g   = ctx.createGain();
-    src.buffer = buf;
+    src.buffer = bufGlitch[(Math.random() * bufGlitch.length) | 0];
     ws.curve = SAT_CRUSH;
     ws.oversample = '2x';
     bp.type = 'bandpass';
@@ -515,13 +601,13 @@ function createAudioEngine() {
     g.gain.setValueAtTime(vol, now);
     g.gain.exponentialRampToValueAtTime(0.0001, now + 0.12);
     src.connect(ws); ws.connect(bp); bp.connect(g); g.connect(bus);
-    src.start(now);
+    src.start(now); src.stop(now + 0.13);
   }
 
   /* ── DATA BURST — trasmissione dati: raffica di micro-impulsi ── */
   function dataBurst(count = 14, spread = 0.5) {
     if (!ok()) return;
-    const now = ctx.currentTime;
+    const now = ctx.currentTime + LOOK;
     for (let i = 0; i < count; i++) {
       const t0  = now + Math.random() * spread;
       const osc = ctx.createOscillator();
@@ -539,10 +625,10 @@ function createAudioEngine() {
   /* ── SWEEP — riser: la tensione che precede la genesi del logo ── */
   function sweep(dur = 1.8) {
     if (!ok()) return;
-    const now = ctx.currentTime;
+    const now = ctx.currentTime + LOOK;
 
     const src = ctx.createBufferSource();
-    src.buffer = noise();
+    src.buffer = bufNoise;
     src.loop = true;
     const bp = ctx.createBiquadFilter();
     bp.type = 'bandpass';
@@ -578,26 +664,21 @@ function createAudioEngine() {
      è esplosivo ma non sgradevole nemmeno sugli speaker del telefono. */
   function braam() {
     if (!ok()) return;
-    const now = ctx.currentTime;
+    const now = ctx.currentTime + LOOK;
 
     const braamBus = ctx.createGain();
     braamBus.gain.value = 1.0;
     braamBus.connect(bus);
 
-    const impLen = Math.floor(ctx.sampleRate * 0.05);
-    const impBuf = ctx.createBuffer(1, impLen, ctx.sampleRate);
-    const idata  = impBuf.getChannelData(0);
-    for (let i = 0; i < impLen; i++)
-      idata[i] = (Math.random() * 2 - 1) * Math.exp(-i / (impLen * 0.12));
     const imp   = ctx.createBufferSource();
     const impLp = ctx.createBiquadFilter();
     const impG  = ctx.createGain();
-    imp.buffer = impBuf;
+    imp.buffer = bufImpact;
     impLp.type = 'lowpass';
     impLp.frequency.value = 1800;
     impG.gain.value = 0.6;
     imp.connect(impLp); impLp.connect(impG); impG.connect(braamBus);
-    imp.start(now);
+    imp.start(now); imp.stop(now + 0.06);
 
     const boom  = ctx.createOscillator();
     const boomG = ctx.createGain();
@@ -657,16 +738,91 @@ function createAudioEngine() {
     });
   }
 
+  /* ── SHATTER — la dissoluzione finale, NON un secondo impatto.
+     Il braam è il climax e va speso una volta sola: sul logo che si
+     compone. Qui il gesto è opposto — la materia si disperde — quindi
+     il suono è speculare: trasiente cristallino in alto invece che
+     botta in basso, filtro che si APRE verso l'acuto e poi svanisce,
+     e un sub breve e morbido che accompagna l'uscita nell'Hero senza
+     ricolpire allo sterno.
+       1 SHARD    burst brevissimo in alta frequenza: il vetro che cede.
+       2 DISPERSE rumore con bandpass che scende 6k→400Hz mentre sfuma:
+                  la nuvola di particelle che si allontana.
+       3 UNDER    sub 45→22Hz a volume contenuto: peso, non impatto.
+       4 TAIL     armoniche alte che si detunano e si spengono. */
+  function shatter() {
+    if (!ok()) return;
+    const now = ctx.currentTime + LOOK;
+
+    // 1 · SHARD — cristallino, quasi istantaneo
+    const sh  = ctx.createBufferSource();
+    const shHp = ctx.createBiquadFilter();
+    const shG = ctx.createGain();
+    sh.buffer = bufTick;
+    sh.playbackRate.value = 0.55; // allunga leggermente il grano
+    shHp.type = 'highpass';
+    shHp.frequency.value = 3800;
+    shG.gain.setValueAtTime(0.34, now);
+    shG.gain.exponentialRampToValueAtTime(0.0001, now + 0.16);
+    sh.connect(shHp); shHp.connect(shG); shG.connect(bus);
+    sh.start(now); sh.stop(now + 0.2);
+
+    // 2 · DISPERSE — la nuvola che si allontana
+    const dis = ctx.createBufferSource();
+    const dbp = ctx.createBiquadFilter();
+    const dG  = ctx.createGain();
+    dis.buffer = bufNoise;
+    dis.loop = true;
+    dbp.type = 'bandpass';
+    dbp.Q.value = 1.1;
+    dbp.frequency.setValueAtTime(6000, now);
+    dbp.frequency.exponentialRampToValueAtTime(400, now + 1.25);
+    dG.gain.setValueAtTime(0.0001, now);
+    dG.gain.exponentialRampToValueAtTime(0.26, now + 0.05);
+    dG.gain.exponentialRampToValueAtTime(0.0001, now + 1.5);
+    dis.connect(dbp); dbp.connect(dG); dG.connect(bus);
+    dis.start(now); dis.stop(now + 1.6);
+
+    // 3 · UNDER — peso, non impatto (metà del sub del braam)
+    const sub  = ctx.createOscillator();
+    const subG = ctx.createGain();
+    sub.type = 'sine';
+    sub.frequency.setValueAtTime(45, now);
+    sub.frequency.exponentialRampToValueAtTime(22, now + 1.1);
+    subG.gain.setValueAtTime(0.0001, now);
+    subG.gain.exponentialRampToValueAtTime(0.42, now + 0.06);
+    subG.gain.exponentialRampToValueAtTime(0.0001, now + 1.8);
+    sub.connect(subG); subG.connect(bus);
+    sub.start(now); sub.stop(now + 1.9);
+
+    // 4 · TAIL — armoniche che si sfilacciano verso l'alto
+    [659.25, 987.77, 1318.51].forEach((f, i) => {
+      const osc = ctx.createOscillator();
+      const g   = ctx.createGain();
+      const t0  = now + i * 0.045;
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(f, t0);
+      osc.frequency.exponentialRampToValueAtTime(f * 1.06, t0 + 1.1); // sale e sfuma
+      g.gain.setValueAtTime(0.0001, t0);
+      g.gain.exponentialRampToValueAtTime(0.034 - i * 0.008, t0 + 0.09);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + 1.2);
+      osc.connect(g); g.connect(bus);
+      osc.start(t0); osc.stop(t0 + 1.3);
+    });
+  }
+
   function destroy() {
     try { stopDrone(0.05); }    catch { /* già spento */ }
     try { stopAmbience(0.05); } catch { /* già spento */ }
-    // NON chiudiamo ctx: window.audioCtx resta vivo per il resto del sito.
-    bus = null; limiter = null; master = null; drone = null; amb = null; noiseBuf = null;
+    // NON chiudiamo ctx né la catena: window.audioCtx resta vivo per il
+    // resto del sito e la coda del braam continua dentro l'Hero.
+    bus = null; limiter = null; master = null; drone = null; amb = null;
   }
 
   return {
-    init, startAmbience, stopAmbience, setIntensity, startDrone, stopDrone,
-    boot, tick, beep, glitch, dataBurst, sweep, braam, destroy, ok,
+    init, suspend, resume, startAmbience, stopAmbience, setIntensity,
+    startDrone, stopDrone, boot, tick, beep, glitch, dataBurst, sweep,
+    braam, shatter, destroy, ok,
   };
 }
 
@@ -687,7 +843,15 @@ const BOOT_LINES = [
 
 /* ═══════════════════════════════════════════════════════════════
    TYPE LINE — typing realistico con micro-glitch sulla testina
+   ───────────────────────────────────────────────────────────────
+   Guidato da rAF, non da setInterval. Un interval a 11ms su un
+   display a 60Hz produce due scritture per frame (una non viene mai
+   dipinta) e un ritmo irregolare; con rAF ogni carattere corrisponde
+   a un fotogramma reale e il tick audio parte nello stesso frame in
+   cui il carattere appare.
 ═══════════════════════════════════════════════════════════════ */
+const CHARS_PER_SEC = 78;
+
 const TypeLine = memo(({ text, code, accent, onKey }) => {
   const ref     = useRef(null);
   const codeRef = useRef(null);
@@ -696,23 +860,42 @@ const TypeLine = memo(({ text, code, accent, onKey }) => {
     const el = ref.current;
     if (!el) return;
     const s = String(text);
-    let i = 0;
-    const id = setInterval(() => {
-      i++;
+    let shown = 0;      // caratteri già stabili
+    let acc = 0;        // accumulatore frazionario
+    let prev = 0;
+    let raf = 0;
+    let lastPaint = -1; // evita scritture DOM ridondanti
+
+    const step = (ts) => {
+      if (!prev) prev = ts;
+      const dt = Math.min((ts - prev) / 1000, 0.1);
+      prev = ts;
+      acc += dt * CHARS_PER_SEC;
+
+      while (acc >= 1 && shown < s.length) {
+        acc -= 1;
+        shown++;
+        if (shown % 3 === 0) onKey?.();
+      }
+
+      if (shown >= s.length) {
+        if (lastPaint !== s.length) el.textContent = s;
+        if (codeRef.current) codeRef.current.style.opacity = '1';
+        return; // nessun rAF ulteriore: la riga è finita
+      }
+
       // La testina sputa un carattere sporco prima di stabilizzarsi:
       // è ciò che rende il typing meccanico invece che perfetto.
-      const head = i < s.length && Math.random() < 0.2
+      const head = Math.random() < 0.2
         ? GLITCH_CH[(Math.random() * GLITCH_CH.length) | 0]
         : '';
-      el.textContent = s.slice(0, i) + head;
-      if (i % 3 === 0) onKey?.(); // un tick ogni 3 caratteri, non ogni carattere
-      if (i >= s.length) {
-        clearInterval(id);
-        el.textContent = s;
-        if (codeRef.current) codeRef.current.style.opacity = '1';
-      }
-    }, 11);
-    return () => clearInterval(id);
+      el.textContent = s.slice(0, shown) + head;
+      lastPaint = shown;
+      raf = requestAnimationFrame(step);
+    };
+
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
   }, [text, onKey]);
 
   return (
@@ -957,6 +1140,8 @@ function GateScreen({ onEnter, audioRef }) {
    Nel loop si usa drawImage: niente shaping del testo per frame,
    niente cambi di fillStyle, e la variazione di scala per colonna
    è gratuita (parametri di destinazione della drawImage).
+   Le coordinate SORGENTE sono pre-moltiplicate per il DPR: due
+   moltiplicazioni in meno per ogni glifo di ogni frame.
 ═══════════════════════════════════════════════════════════════ */
 function buildGlyphAtlas(fontPx, dpr) {
   const pad = 3;
@@ -994,7 +1179,12 @@ function buildGlyphAtlas(fontPx, dpr) {
     }
   }
 
-  return { cv, xs, widths, cellH };
+  // Coordinate sorgente già in pixel-device
+  const xsD = new Float32Array(TOTAL_N);
+  const wD  = new Float32Array(TOTAL_N);
+  for (let i = 0; i < TOTAL_N; i++) { xsD[i] = xs[i] * dpr; wD[i] = widths[i] * dpr; }
+
+  return { cv, xs, widths, xsD, wD, cellH, cellHD: cellH * dpr };
 }
 
 
@@ -1002,7 +1192,7 @@ function buildGlyphAtlas(fontPx, dpr) {
    CAMPIONAMENTO DEL LOGO
    ───────────────────────────────────────────────────────────────
    Disegna SEBAMOX su un canvas offscreen delle sole dimensioni del
-   testo, campiona la maschera alpha con passo `stride` e restituisce
+   testo, campiona la maschera alpha con passo ADATTIVO e restituisce
    i punti in coordinate schermo. Fisher-Yates sugli indici così le
    particelle si distribuiscono su TUTTA la parola: senza shuffle le
    prime lettere si formerebbero prima delle ultime.
@@ -1065,8 +1255,8 @@ function sampleLogoPoints(W, H, stride, maxPoints, cy) {
   /* Campionamento a passo ADATTIVO.
      Uno stride fisso produce un logo denso su desktop e sgranato su
      mobile (la parola rimpicciolisce, il passo no). Qui si parte dal
-     passo del tier e lo si stringe finché la densità non è degna:
-     il numero di particelle resta vicino al tetto del tier a QUALSIASI
+     passo del tier e lo si stringe finché la densità non è degna: il
+     numero di particelle resta vicino al tetto del tier a QUALSIASI
      viewport, quindi la parola è sempre piena e leggibile. */
   const collect = (st) => {
     const out = [];
@@ -1110,12 +1300,15 @@ function sampleLogoPoints(W, H, stride, maxPoints, cy) {
    GHOST SCENE — l'intero spettacolo su UN canvas 2D
    ───────────────────────────────────────────────────────────────
    props (tutti ref → ZERO re-render di React durante l'animazione):
-   - modeRef    : { mode, t0 }  macchina a fasi
+   - clockRef   : { t } show-clock condivisa, avanzata QUI
+   - onFrameRef : { current } callback chiamata ogni frame con la
+                  show-clock: è il cuore della sincronia audio/video
+   - modeRef    : { mode, t0, dur } macchina a fasi (t0 in show-clock)
    - pointerRef : { x, y, tx, ty, s, ts } campo magnetico del cursore
-   - flareRef   : { current }  flash dell'exit
+   - flareRef   : { current } flash dell'exit
    - reduced    : prefers-reduced-motion
 ═══════════════════════════════════════════════════════════════ */
-const GhostScene = memo(({ modeRef, pointerRef, flareRef, reduced }) => {
+const GhostScene = memo(({ clockRef, onFrameRef, modeRef, pointerRef, flareRef, reduced }) => {
   const cvRef = useRef(null);
 
   useEffect(() => {
@@ -1133,8 +1326,9 @@ const GhostScene = memo(({ modeRef, pointerRef, flareRef, reduced }) => {
     let frameAcc = 0, frameCount = 0;
 
     /* ── Dimensioni (nessuna lettura DOM nel loop) ────────────── */
-    let W = 0, H = 0, dpr = 1;
+    let W = 0, H = 0, dpr = 1, dprInv = 1;
     let logoCy = 0;
+    let fieldR = 230, fieldR2 = 230 * 230;
 
     /* ── Atlante glifi ────────────────────────────────────────── */
     let atlas = null;
@@ -1170,6 +1364,13 @@ const GhostScene = memo(({ modeRef, pointerRef, flareRef, reduced }) => {
     const pVX = new Float32Array(MAX_P);  // velocità d'esplosione x
     const pVY = new Float32Array(MAX_P);  // velocità d'esplosione y
     const pSz = new Float32Array(MAX_P);  // dimensione
+    // Scratch per il batching: posizione/dimensione calcolate una
+    // volta, poi disegnate raggruppate per livello di alpha.
+    const sX = new Float32Array(MAX_P);
+    const sY = new Float32Array(MAX_P);
+    const sS = new Float32Array(MAX_P);
+    const sL = new Uint8Array(MAX_P);     // livello corpo (255 = scartata)
+    const sC = new Uint8Array(MAX_P);     // livello nucleo (255 = assente)
     let pCount = 0;
     let logoFs = 0;
 
@@ -1212,40 +1413,52 @@ const GhostScene = memo(({ modeRef, pointerRef, flareRef, reduced }) => {
     const rebuildLogo = () => {
       logoCy = H * 0.445;
       const res = sampleLogoPoints(W, H, tier.stride, tier.particles, logoCy);
-      pCount = Math.min(res.count, MAX_P);
-      logoFs = res.fontSize;
-      for (let i = 0; i < pCount; i++) {
-        pTX[i] = res.pts[i * 2];
-        pTY[i] = res.pts[i * 2 + 1];
+      // Se il campionamento fallisce (0 punti) NON azzero i target:
+      // meglio il logo precedente che nessun logo.
+      if (res.count > 0) {
+        pCount = Math.min(res.count, MAX_P);
+        logoFs = res.fontSize;
+        for (let i = 0; i < pCount; i++) {
+          pTX[i] = res.pts[i * 2];
+          pTY[i] = res.pts[i * 2 + 1];
+        }
+        // Espone l'altezza reale del logo: la tagline DOM si posiziona
+        // di conseguenza e non si sovrappone mai, a nessun viewport.
+        document.documentElement.style.setProperty('--pre-logo-h', `${logoFs}px`);
       }
-      // Espone l'altezza reale del logo: la tagline DOM si posiziona
-      // di conseguenza e non si sovrappone mai, a nessun viewport.
-      document.documentElement.style.setProperty('--pre-logo-h', `${logoFs}px`);
     };
 
-    const setup = () => {
+    const setup = (withLogo = true) => {
       W = window.innerWidth;
       H = window.innerHeight;
       dpr = Math.min(window.devicePixelRatio || 1, tier.dprCap);
+      dprInv = 1 / dpr;
       cv.width  = Math.floor(W * dpr);
       cv.height = Math.floor(H * dpr);
       g.setTransform(dpr, 0, 0, dpr, 0, 0);
+      // Il raggio del campo magnetico scala col viewport: 230px fissi
+      // coprirebbero due terzi di uno schermo da 390px.
+      fieldR = Math.max(130, Math.min(W, H) * 0.26);
+      fieldR2 = fieldR * fieldR;
       atlas = buildGlyphAtlas(tier.fontPx, dpr);
       buildColumns();
-      rebuildLogo();
+      if (withLogo) rebuildLogo();
     };
     setup();
 
-    // I webfont possono arrivare dopo il primo paint: quando Geist è
-    // pronto ricampiono il logo, così le particelle disegnano la forma
-    // definitiva e non il fallback di sistema.
+    // I webfont possono arrivare dopo il primo paint: quando sono
+    // pronti ricostruisco atlante e logo, così le particelle disegnano
+    // la forma definitiva e non il fallback di sistema.
     let fontsAlive = true;
     if (document.fonts && document.fonts.ready) {
       document.fonts.ready.then(() => {
+        const m = modeRef.current.mode;
         // Solo se la genesi non è ancora iniziata: rimappare i target
         // a metà volo farebbe "saltare" le particelle.
-        const m = modeRef.current.mode;
-        if (fontsAlive && (m === 'idle' || m === 'boot' || m === 'rain')) rebuildLogo();
+        if (fontsAlive && (m === 'idle' || m === 'boot' || m === 'rain')) {
+          atlas = buildGlyphAtlas(tier.fontPx, dpr);
+          rebuildLogo();
+        }
       }).catch(() => {});
     }
 
@@ -1257,6 +1470,7 @@ const GhostScene = memo(({ modeRef, pointerRef, flareRef, reduced }) => {
     let rainFade = 0;   // 0..1 intensità della pioggia
     let converged = 0;  // 0..1 avanzamento della genesi
     let mutAcc = 0;     // accumulatore per la mutazione dei glifi
+    const DT_MAX = reduced ? DT_CLAMP_REDUCED : DT_CLAMP;
 
     const initConverge = () => {
       // Le particelle NASCONO dai glifi realmente a schermo: è questo
@@ -1287,24 +1501,37 @@ const GhostScene = memo(({ modeRef, pointerRef, flareRef, reduced }) => {
       }
     };
 
-    /* ── Campo magnetico del cursore ──────────────────────────── */
-    const FIELD_R  = 230;
-    const FIELD_R2 = FIELD_R * FIELD_R;
-
     const draw = (ts) => {
       if (!reduced) raf = requestAnimationFrame(draw);
       if (!prevTs) prevTs = ts;
-      const dt = Math.min((ts - prevTs) / 1000, 0.05); // anti-salto da tab inattiva
+      // Clamp: un frame perso NON diventa un salto. Sotto i 20fps lo
+      // show rallenta invece di teletrasportarsi, e con la tab nascosta
+      // (rAF fermo) la clock si congela del tutto.
+      const dt = Math.min((ts - prevTs) / 1000, DT_MAX);
       prevTs = ts;
-      const time = ts / 1000;
 
-      /* ── Quality Governor: misura e degrada se serve ────────── */
+      /* ── LA SHOW-CLOCK ─────────────────────────────────────────
+         Avanza qui e solo qui. Prima si consumano gli eventi dovuti,
+         poi si disegna: un evento audio e il fotogramma che gli
+         corrisponde cadono nello stesso frame, sempre. */
+      const clock = clockRef.current;
+      clock.t += dt;
+      const time = clock.t;
+      onFrameRef.current?.(time);
+
+      /* ── Quality Governor ──────────────────────────────────────
+         Congelato dopo la fase RAIN: degradare durante la genesi
+         ricostruirebbe i target del logo con un nuovo shuffle e le
+         particelle salterebbero a mezz'aria. Oltretutto il finale è
+         già la fase più economica: non c'è nulla da guadagnare. */
       frameAcc += dt * 1000;
       frameCount++;
       if (frameCount >= FRAME_WINDOW) {
         const avg = frameAcc / frameCount;
         frameAcc = 0; frameCount = 0;
-        if (avg > FRAME_BUDGET && tierIdx < QUALITY_TIERS.length - 1) {
+        const m = modeRef.current.mode;
+        const canDegrade = m === 'idle' || m === 'boot' || m === 'rain';
+        if (canDegrade && avg > FRAME_BUDGET && tierIdx < QUALITY_TIERS.length - 1) {
           tierIdx++;
           tier = QUALITY_TIERS[tierIdx];
           setup();
@@ -1314,10 +1541,9 @@ const GhostScene = memo(({ modeRef, pointerRef, flareRef, reduced }) => {
       /* ── Fase corrente ─────────────────────────────────────── */
       const md   = modeRef.current;
       const mode = md.mode;
-      const lt   = (ts - md.t0) / 1000;
-      // Durata effettiva della fase: iniettata da React, così il
-      // profilo "reduced motion" collassa le fasi invece di riprodurle
-      // a scatti sul polling a bassa frequenza.
+      const lt   = time - md.t0;
+      // Durata effettiva della fase, iniettata da React: il profilo
+      // reduced-motion collassa le fasi invece di riprodurle a scatti.
       const mdur = md.dur > 0 ? md.dur : (mode === 'exit' ? D.exit : D.converge);
 
       if (mode !== lastMode) {
@@ -1378,6 +1604,7 @@ const GhostScene = memo(({ modeRef, pointerRef, flareRef, reduced }) => {
       /* ════ 2 · PIOGGIA DIGITALE ════════════════════════════════ */
       if (rainFade > 0.004 && atlas) {
         const rowHBase = atlas.cellH;
+        const cellHD = atlas.cellHD;
         const cellW = tier.cellW;
         snapN = 0;
 
@@ -1410,23 +1637,36 @@ const GhostScene = memo(({ modeRef, pointerRef, flareRef, reduced }) => {
           const rowH  = rowHBase * sc;
           const len   = colLen[i];
           const baseX = i * cellW + cellW * 0.5;
+          const headY = colY[i];
 
-          if (colY[i] - len * rowH > H) { resetColumn(i); continue; }
+          if (headY - len * rowH > H) { resetColumn(i); continue; }
 
           const colAlpha = colAl[i] * rainFade;
-          const halfH = atlas.cellH * sc * 0.5;
+          const halfH = rowH * 0.5;
+          const dstH  = atlas.cellH * sc;
+          const rowBase = i * MAX_TRAIL;
 
           for (let k = 0; k < len; k++) {
-            const gy = colY[i] - k * rowH;
-            if (gy < -rowH || gy > H + rowH) continue;
+            const gy = headY - k * rowH;
+            // La scia sale: una volta sopra il bordo, TUTTI i glifi
+            // successivi sono fuori. `break`, non `continue`.
+            if (gy < -rowH) break;
+            if (gy > H + rowH) continue;
 
-            const gid = colBuf[i * MAX_TRAIL + k];
-            const gw  = atlas.widths[gid];
-            const halfW = gw * sc * 0.5;
+            // Alpha PRIMA della matematica del campo: scartare qui
+            // evita una radice quadrata su glifi invisibili.
+            const isHead = k === 0;
+            const fall = 1 - k / len;
+            let a = colAlpha * (isHead ? 1 : fall * fall * 0.82);
+            if (a <= 0.008 && !fieldOn) continue;
+            if (!isHead && Math.random() < 0.012) a *= 2.6; // flicker
+
+            const gid = colBuf[rowBase + k];
+            const dstW = atlas.widths[gid] * sc;
+            const halfW = dstW * 0.5;
 
             let dx = baseX - halfW;
             let dy = gy - halfH;
-            let boost = 0;
 
             /* ── Campo magnetico: attrazione + vortice tangenziale ──
                   L'effetto è funzione PURA di (x, y, puntatore
@@ -1437,31 +1677,32 @@ const GhostScene = memo(({ modeRef, pointerRef, flareRef, reduced }) => {
               const vx = P.x - (dx + halfW);
               const vy = P.y - (dy + halfH);
               const d2 = vx * vx + vy * vy;
-              if (d2 < FIELD_R2) {
+              if (d2 < fieldR2) {
                 const d = Math.sqrt(d2) || 1;
-                const f = 1 - d / FIELD_R;
-                const pull = f * f * P.s * 46;
+                const f = 1 - d / fieldR;
+                const ff = f * f * P.s;
+                const pull = ff * 46;
                 dx += (vx / d) * pull - (vy / d) * pull * 0.42;
                 dy += (vy / d) * pull + (vx / d) * pull * 0.42;
-                boost = f * f * P.s * 0.7;
+                a += ff * 0.7;
               }
             }
 
-            // Testa luminosa, coda che si spegne + sfarfallio casuale
-            const isHead = k === 0;
-            const fall = 1 - k / len;
-            let a = colAlpha * (isHead ? 1 : fall * fall * 0.82) + boost;
-            if (!isHead && Math.random() < 0.012) a *= 2.6; // flicker
             if (a <= 0.01) continue;
             if (a > 1) a = 1;
+
+            // Snap al pixel-device: elimina il filtraggio bilineare
+            // che rende i glifi molli. Il movimento resta fluido
+            // perché il passo è 1/dpr, non 1 pixel CSS.
+            dx = Math.round(dx * dpr) * dprInv;
+            dy = Math.round(dy * dpr) * dprInv;
 
             g.globalAlpha = a;
             g.drawImage(
               atlas.cv,
-              atlas.xs[gid] * dpr, (isHead ? atlas.cellH : 0) * dpr,
-              gw * dpr, atlas.cellH * dpr,
-              dx, dy,
-              gw * sc, atlas.cellH * sc
+              atlas.xsD[gid], isHead ? cellHD : 0,
+              atlas.wD[gid], cellHD,
+              dx, dy, dstW, dstH
             );
 
             if (snapN < MAX_SNAP) {
@@ -1487,7 +1728,14 @@ const GhostScene = memo(({ modeRef, pointerRef, flareRef, reduced }) => {
         g.globalAlpha = 1;
       }
 
-      /* ════ 4 · GENESI / LOGO / ESPLOSIONE ══════════════════════ */
+      /* ════ 4 · GENESI / LOGO / ESPLOSIONE ══════════════════════
+         Due passate:
+           A) calcolo posizione, dimensione e livello di alpha di ogni
+              particella (scratch pre-allocati, zero allocazioni);
+           B) disegno RAGGRUPPATO per livello: una path per livello e
+              una sola fill. 12 draw call invece di ~5200 — cambiare
+              globalAlpha a ogni fillRect spezza il batching di Skia
+              ed è, di gran lunga, il costo più alto del finale.     */
       if (mode === 'converge' || mode === 'reveal' || mode === 'exit') {
         const cx = W * 0.5;
         const cy = logoCy;
@@ -1496,9 +1744,10 @@ const GhostScene = memo(({ modeRef, pointerRef, flareRef, reduced }) => {
 
         const exploding = mode === 'exit';
         const eAlpha = exploding ? clamp01(1 - lt / (mdur * 0.92)) : 1;
+        const settled = converged >= 1;
+        const fieldActive = fieldOn && converged > 0.9 && !exploding;
 
-        g.globalCompositeOperation = 'lighter';
-
+        // ── Passata A ────────────────────────────────────────────
         for (let i = 0; i < pCount; i++) {
           let x, y, a, sz;
 
@@ -1510,15 +1759,19 @@ const GhostScene = memo(({ modeRef, pointerRef, flareRef, reduced }) => {
             y  = pTY[i] + pVY[i] * k * 0.92;
             a  = eAlpha * (0.55 + (i % 7) * 0.06);
             sz = pSz[i] * (1 + k * 0.9);
+          } else if (settled) {
+            // Respiro impercettibile: il logo è vivo, non un PNG
+            x  = pTX[i] + Math.sin(time * 1.5 + pPh[i]) * 0.5;
+            y  = pTY[i] + Math.cos(time * 1.2 + pPh[i]) * 0.5;
+            a  = 0.72 + Math.sin(time * 2.1 + pPh[i]) * 0.14;
+            sz = pSz[i];
           } else {
             const local = clamp01((converged - pDL[i]) / (1 - pDL[i]));
             const e = easeOutExpo(easeInOutCub(local));
-
             if (e >= 0.999) {
-              // Respiro impercettibile: il logo è vivo, non un PNG
-              x  = pTX[i] + Math.sin(time * 1.5 + pPh[i]) * 0.5;
-              y  = pTY[i] + Math.cos(time * 1.2 + pPh[i]) * 0.5;
-              a  = 0.72 + Math.sin(time * 2.1 + pPh[i]) * 0.14;
+              x  = pTX[i];
+              y  = pTY[i];
+              a  = 0.82;
               sz = pSz[i];
             } else {
               // Rotazione convergente: il vettore start→target ruota
@@ -1538,34 +1791,73 @@ const GhostScene = memo(({ modeRef, pointerRef, flareRef, reduced }) => {
               a  = 0.20 + e * 0.62;
               sz = pSz[i] * (0.75 + e * 0.35);
             }
+          }
 
-            // Anche il logo assemblato risponde al cursore
-            if (fieldOn && converged > 0.9) {
-              const vx = P.x - x, vy = P.y - y;
-              const d2 = vx * vx + vy * vy;
-              if (d2 < FIELD_R2) {
-                const d = Math.sqrt(d2) || 1;
-                const f = 1 - d / FIELD_R;
-                const push = f * f * P.s * 20;
-                x -= (vx / d) * push;
-                y -= (vy / d) * push;
-                a += f * f * P.s * 0.3;
-              }
+          // Anche il logo assemblato risponde al cursore
+          if (fieldActive) {
+            const vx = P.x - x, vy = P.y - y;
+            const d2 = vx * vx + vy * vy;
+            if (d2 < fieldR2) {
+              const d = Math.sqrt(d2) || 1;
+              const f = 1 - d / fieldR;
+              const ff = f * f * P.s;
+              const push = ff * 20;
+              x -= (vx / d) * push;
+              y -= (vy / d) * push;
+              a += ff * 0.3;
             }
           }
 
-          if (a <= 0.01) continue;
+          if (a <= 0.012) { sL[i] = 255; sC[i] = 255; continue; }
+          if (a > 1) a = 1;
 
-          // Corpo emerald
-          g.globalAlpha = a * 0.85;
-          g.fillStyle = T.emerald;
-          g.fillRect(x - sz * 0.5, y - sz * 0.5, sz, sz);
-          // Nucleo pallido: il bloom nasce dalla sovrapposizione
-          // additiva, non da shadowBlur (killer di fill-rate).
+          sX[i] = x - sz * 0.5;
+          sY[i] = y - sz * 0.5;
+          sS[i] = sz;
+          let lv = (a * A_LEVELS) | 0;
+          if (lv > A_LEVELS - 1) lv = A_LEVELS - 1;
+          sL[i] = lv;
+          // Nucleo pallido solo sopra metà alpha: il bloom nasce dalla
+          // sovrapposizione additiva, non da shadowBlur (killer di
+          // fill-rate).
           if (a > 0.5) {
-            g.globalAlpha = (a - 0.5) * 1.1;
-            g.fillStyle = T.pale;
-            g.fillRect(x - sz * 0.28, y - sz * 0.28, sz * 0.56, sz * 0.56);
+            let cl = (((a - 0.5) * 2) * C_LEVELS) | 0;
+            if (cl > C_LEVELS - 1) cl = C_LEVELS - 1;
+            sC[i] = cl;
+          } else {
+            sC[i] = 255;
+          }
+        }
+
+        // ── Passata B: corpo emerald, una fill per livello ───────
+        g.globalCompositeOperation = 'lighter';
+        g.fillStyle = T.emerald;
+        for (let lv = 0; lv < A_LEVELS; lv++) {
+          let opened = false;
+          for (let i = 0; i < pCount; i++) {
+            if (sL[i] !== lv) continue;
+            if (!opened) { g.beginPath(); opened = true; }
+            g.rect(sX[i], sY[i], sS[i], sS[i]);
+          }
+          if (opened) {
+            g.globalAlpha = ((lv + 0.5) / A_LEVELS) * 0.85;
+            g.fill();
+          }
+        }
+
+        // ── Passata B2: nucleo pallido ───────────────────────────
+        g.fillStyle = T.pale;
+        for (let cl = 0; cl < C_LEVELS; cl++) {
+          let opened = false;
+          for (let i = 0; i < pCount; i++) {
+            if (sC[i] !== cl) continue;
+            if (!opened) { g.beginPath(); opened = true; }
+            const s = sS[i], q = s * 0.28;
+            g.rect(sX[i] + q, sY[i] + q, s * 0.56, s * 0.56);
+          }
+          if (opened) {
+            g.globalAlpha = ((cl + 0.5) / C_LEVELS) * 0.55;
+            g.fill();
           }
         }
 
@@ -1606,10 +1898,7 @@ const GhostScene = memo(({ modeRef, pointerRef, flareRef, reduced }) => {
       // Accessibilità: niente loop a 60fps. Un frame ogni 120ms, che
       // basta per far avanzare le fasi senza movimento continuo.
       draw(performance.now());
-      reducedPoll = setInterval(() => {
-        prevTs = 0;
-        draw(performance.now());
-      }, 120);
+      reducedPoll = setInterval(() => draw(performance.now()), 120);
     } else {
       raf = requestAnimationFrame(draw);
     }
@@ -1617,7 +1906,9 @@ const GhostScene = memo(({ modeRef, pointerRef, flareRef, reduced }) => {
     /* ── RESIZE intelligente ──────────────────────────────────
        Ignora i resize puramente verticali (URL bar di iOS che
        appare/scompare durante lo scroll): reagisce solo a
-       variazioni di larghezza > 30px o al cambio d'orientamento. */
+       variazioni di larghezza > 30px o al cambio d'orientamento.
+       Durante la genesi ricostruisce tutto TRANNE i target del
+       logo, che rimapperebbero le particelle a mezz'aria. */
     let prevW = window.innerWidth;
     let prevOrient = window.innerWidth > window.innerHeight ? 'l' : 'p';
     let resizeTimer = 0;
@@ -1628,7 +1919,8 @@ const GhostScene = memo(({ modeRef, pointerRef, flareRef, reduced }) => {
       clearTimeout(resizeTimer);
       resizeTimer = setTimeout(() => {
         prevW = nw; prevOrient = no;
-        setup();
+        const m = modeRef.current.mode;
+        setup(m === 'idle' || m === 'boot' || m === 'rain');
       }, 200);
     };
 
@@ -1650,7 +1942,7 @@ const GhostScene = memo(({ modeRef, pointerRef, flareRef, reduced }) => {
       else window.removeEventListener('resize', handleResize);
       document.documentElement.style.removeProperty('--pre-logo-h');
     };
-  }, [modeRef, pointerRef, flareRef, reduced]);
+  }, [clockRef, onFrameRef, modeRef, pointerRef, flareRef, reduced]);
 
   return (
     <canvas
@@ -1683,9 +1975,16 @@ export default function Preloader({ onComplete }) {
 
   /* Canali verso il canvas — ref, MAI state: letti a 60fps senza
      provocare un solo re-render di React. */
-  const modeRef    = useRef({ mode: 'idle', t0: 0 });
+  const modeRef    = useRef({ mode: 'idle', t0: 0, dur: 0 });
   const flareRef   = useRef(0);
   const pointerRef = useRef({ x: -9999, y: -9999, tx: -9999, ty: -9999, s: 0, ts: 0 });
+
+  /* Show-clock condivisa + coda di eventi ordinata. */
+  const clockRef   = useRef({ t: 0 });
+  const queueRef   = useRef([]);
+  const qiRef      = useRef(0);
+  const onFrameRef = useRef(null);
+  const tweensRef  = useRef([]);
 
   const [booting, setBooting] = useState(false);
   const [lines, setLines]     = useState([]);
@@ -1697,11 +1996,20 @@ export default function Preloader({ onComplete }) {
 
   const onKey = useCallback(() => { audioRef.current?.tick(0.13); }, []);
 
+  /* Registra i tween DOM così il cleanup può ucciderli tutti: sono
+     creati dentro callback della coda, quindi fuori dalla portata di
+     gsap.context(). */
+  const track = useCallback((tw) => { tweensRef.current.push(tw); return tw; }, []);
+
   /* Con reduced-motion le fasi non vengono "riprodotte più veloci":
      collassano a durata ~0, così il canvas mostra lo stato finale
      invece di animarlo a scatti sul polling a bassa frequenza. */
   const setMode = useCallback((mode, dur = 0) => {
-    modeRef.current = { mode, t0: performance.now(), dur: reducedMotion ? 0.001 : dur };
+    modeRef.current = {
+      mode,
+      t0: clockRef.current.t,
+      dur: reducedMotion ? 0.001 : dur,
+    };
   }, [reducedMotion]);
 
   /* ── [AUDIO] Engine creato EAGER, distrutto al dismount ────────
@@ -1712,6 +2020,26 @@ export default function Preloader({ onComplete }) {
   useEffect(() => {
     if (!audioRef.current) audioRef.current = createAudioEngine();
     return () => { audioRef.current?.destroy(); audioRef.current = null; };
+  }, []);
+
+  /* ── [VISIBILITÀ] Audio e video congelano INSIEME ──────────────
+     Il rAF si ferma da solo quando la tab è nascosta, quindi la
+     show-clock si congela; qui congelo anche l'AudioContext, così al
+     ritorno non c'è un solo millisecondo di deriva fra ciò che si
+     sente e ciò che si vede. Al dismount riprendo sempre: il contesto
+     è condiviso col resto del sito e non va lasciato sospeso. */
+  useEffect(() => {
+    const onVis = () => {
+      const A = audioRef.current;
+      if (!A) return;
+      if (document.hidden) A.suspend();
+      else if (!doneRef.current) A.resume();
+    };
+    document.addEventListener('visibilitychange', onVis);
+    return () => {
+      document.removeEventListener('visibilitychange', onVis);
+      audioRef.current?.resume();
+    };
   }, []);
 
   /* ── [VH] Fallback --real-vh per Safari iOS < 15.4 ───────────── */
@@ -1764,18 +2092,39 @@ export default function Preloader({ onComplete }) {
       P.tx = t.clientX; P.ty = t.clientY; P.ts = 1;
       if (P.x < -1000) { P.x = t.clientX; P.y = t.clientY; }
     };
-    window.addEventListener('pointermove', move,  { passive: true });
+    window.addEventListener('pointermove', move,   { passive: true });
     window.addEventListener('pointerleave', leave, { passive: true });
-    window.addEventListener('blur', leave, { passive: true });
-    window.addEventListener('touchmove', touch, { passive: true });
-    window.addEventListener('touchend', leave,  { passive: true });
+    window.addEventListener('blur', leave,         { passive: true });
+    window.addEventListener('touchmove', touch,    { passive: true });
+    window.addEventListener('touchend', leave,     { passive: true });
+    document.addEventListener('mouseleave', leave, { passive: true });
     return () => {
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerleave', leave);
       window.removeEventListener('blur', leave);
       window.removeEventListener('touchmove', touch);
       window.removeEventListener('touchend', leave);
+      document.removeEventListener('mouseleave', leave);
     };
+  }, []);
+
+  /* ── [CLOCK] Consumo della coda, un frame alla volta ───────────
+     Chiamata dal rAF del canvas con la show-clock aggiornata. Gli
+     eventi sono ordinati: si eseguono tutti quelli dovuti e si avanza
+     l'indice, quindi nessun evento può ripetersi o essere saltato. */
+  useEffect(() => {
+    onFrameRef.current = (t) => {
+      const q = queueRef.current;
+      let i = qiRef.current;
+      while (i < q.length && q[i].at <= t) {
+        const ev = q[i];
+        i++;
+        qiRef.current = i; // avanzo PRIMA di eseguire: un throw non ricicla l'evento
+        ev.fn();
+      }
+      qiRef.current = i;
+    };
+    return () => { onFrameRef.current = null; };
   }, []);
 
   /* ── EXIT SEQUENCE ─────────────────────────────────────────────
@@ -1789,12 +2138,19 @@ export default function Preloader({ onComplete }) {
     if (doneRef.current) return;
     doneRef.current = true;
 
+    // Da qui in poi la coda è chiusa: nessun evento residuo può
+    // sparare audio sopra l'uscita (es. skip premuto a metà show).
+    queueRef.current = [];
+    qiRef.current = 0;
+
     const el = containerRef.current;
     if (!el) { onComplete?.(); return; }
     el.style.pointerEvents = 'none'; // da qui il sito sotto è interattivo
 
+    // Dispersione, non un secondo impatto: il braam appartiene solo
+    // al momento in cui il logo si compone.
     const A = audioRef.current;
-    A?.braam();
+    A?.shatter();
     A?.stopDrone(0.9);
     A?.stopAmbience(0.9);
 
@@ -1806,7 +2162,9 @@ export default function Preloader({ onComplete }) {
     };
 
     if (reducedMotion) {
-      gsap.to(el, { opacity: 0, duration: 0.6, ease: 'power2.out', force3D: true, onComplete: finish });
+      track(gsap.to(el, {
+        opacity: 0, duration: 0.6, ease: 'power2.out', force3D: true, onComplete: finish,
+      }));
       return;
     }
 
@@ -1814,7 +2172,7 @@ export default function Preloader({ onComplete }) {
     // ancora nulli. Li filtro invece di passarli a GSAP.
     const veils = [bgRef.current, fxRef.current].filter(Boolean);
 
-    const tl = gsap.timeline({ onComplete: finish });
+    const tl = track(gsap.timeline({ onComplete: finish }));
     tl
       .to(flareRef, { current: 1, duration: 0.09, ease: 'power2.in' }, 0)
       .to(flareRef, { current: 0, duration: 0.62, ease: 'power2.out' }, 0.09);
@@ -1838,7 +2196,7 @@ export default function Preloader({ onComplete }) {
     tl.to(el, {
       opacity: 0, duration: 0.34, ease: 'power2.inOut', force3D: true,
     }, Math.max(0.4, DUR.exit - 0.36));
-  }, [reducedMotion, onComplete, setMode, DUR.exit]);
+  }, [reducedMotion, onComplete, setMode, track, DUR.exit]);
 
   // exitRef tiene l'ultima closure senza rientrare nel render path.
   useEffect(() => { exitRef.current = exitSequence; }, [exitSequence]);
@@ -1860,89 +2218,103 @@ export default function Preloader({ onComplete }) {
   }, []);
 
   /* ── COREOGRAFIA COMPLETA ──────────────────────────────────────
-     Tutta la sequenza vive dentro un gsap.context(): un solo revert()
-     al cleanup uccide timeline, delayedCall e tween in un colpo.   */
+     Una coda di eventi in show-clock, non timer indipendenti. Audio,
+     cambi di fase e tween partono dallo stesso frame del canvas.   */
   useEffect(() => {
     if (!booting) return;
     const A = audioRef.current;
 
+    const q = [];
+    const at = (t, fn) => q.push({ at: Math.max(0, t), fn });
+
+    /* ─ ATTO 1 · TERMINALE ─────────────────────────────────── */
+    const step = (DUR.boot - 0.45) / BOOT_LINES.length;
+    BOOT_LINES.forEach((line, i) => {
+      at(0.28 + i * step, () => {
+        setLines(prev => (prev.length > i ? prev : [...prev, line]));
+        if (line.accent) { A?.glitch(0.16); A?.beep(1180, 0.07, 0.16); }
+        else if (i % 2 === 0) A?.beep(1620 + i * 90, 0.035, 0.07);
+      });
+    });
+    at(DUR.boot * 0.42, () => A?.glitch(0.08));
+    at(DUR.boot * 0.74, () => A?.glitch(0.07));
+
+    /* ─ ATTO 2 · PIOGGIA ───────────────────────────────────── */
+    const tRain = DUR.boot;
+    at(tRain - 0.2, () => {
+      if (!termRef.current) return;
+      track(gsap.to(termRef.current, {
+        opacity: 0, y: -14, filter: 'blur(7px)',
+        duration: 0.75, ease: 'power3.inOut', force3D: true,
+      }));
+    });
+
+    if (DUR.rain > 0) {
+      at(tRain, () => {
+        setMode('rain', DUR.rain);
+        A?.startDrone();
+        A?.setIntensity(0.55);
+        A?.glitch(0.15);
+        A?.dataBurst(20, 0.7);
+      });
+      at(tRain + DUR.rain * 0.42, () => A?.dataBurst(14, 0.6));
+      at(tRain + DUR.rain * 0.72, () => {
+        A?.beep(880, 0.05, 0.12);
+        A?.setIntensity(0.82);
+      });
+      at(tRain + DUR.rain - 1.35, () => A?.sweep(1.7));
+    }
+
+    /* ─ ATTO 3 · GENESI DEL LOGO ───────────────────────────── */
+    const tConv = tRain + DUR.rain;
+    at(tConv, () => {
+      setMode('converge', DUR.converge);
+      A?.setIntensity(1);
+      A?.dataBurst(26, 0.9);
+    });
+
+    /* ─ ATTO 4 · LOGO + TAGLINE ────────────────────────────── */
+    const tReveal = tConv + DUR.converge;
+    at(tReveal - 0.16, () => {
+      A?.braam();
+      A?.setIntensity(0.35);
+    });
+    at(tReveal, () => setMode('reveal', DUR.reveal));
+    at(tReveal + 0.16, () => {
+      if (!taglineRef.current) return;
+      track(gsap.fromTo(
+        taglineRef.current.querySelectorAll('.tag-row'),
+        { opacity: 0, y: 26, filter: 'blur(9px)' },
+        {
+          opacity: 1, y: 0, filter: 'blur(0px)',
+          duration: 1.25, ease: 'expo.out', force3D: true, stagger: 0.14,
+        }
+      ));
+    });
+
+    /* ─ ATTO 5 · USCITA ────────────────────────────────────── */
+    at(tReveal + DUR.reveal, () => exitRef.current?.());
+
+    // La coda deve essere ordinata: il consumo si ferma al primo
+    // evento non ancora dovuto.
+    q.sort((a, b) => a.at - b.at);
+
+    // Azzero la clock QUI: da questo istante i tempi della coda sono
+    // assoluti rispetto all'inizio dello show.
+    clockRef.current.t = 0;
+    queueRef.current = q;
+    qiRef.current = 0;
+
     setMode('boot', DUR.boot);
     A?.setIntensity(0.15);
 
-    const gsapCtx = gsap.context(() => {
-      /* ─ ATTO 1 · TERMINALE ─────────────────────────────────── */
-      const step = (DUR.boot - 0.45) / BOOT_LINES.length;
-      BOOT_LINES.forEach((line, i) => {
-        gsap.delayedCall(0.28 + i * step, () => {
-          setLines(prev => (prev.length > i ? prev : [...prev, line]));
-          if (line.accent) { A?.glitch(0.16); A?.beep(1180, 0.07, 0.16); }
-          else if (i % 2 === 0) A?.beep(1620 + i * 90, 0.035, 0.07);
-        });
-      });
-
-      // Interferenze sparse durante il boot
-      gsap.delayedCall(DUR.boot * 0.42, () => A?.glitch(0.08));
-      gsap.delayedCall(DUR.boot * 0.74, () => A?.glitch(0.07));
-
-      /* ─ ATTO 2 · PIOGGIA ───────────────────────────────────── */
-      const tRain = DUR.boot;
-      gsap.delayedCall(Math.max(0.1, tRain - 0.2), () => {
-        if (!termRef.current) return;
-        gsap.to(termRef.current, {
-          opacity: 0, y: -14, filter: 'blur(7px)',
-          duration: 0.75, ease: 'power3.inOut', force3D: true,
-        });
-      });
-
-      if (DUR.rain > 0) {
-        gsap.delayedCall(tRain, () => {
-          setMode('rain', DUR.rain);
-          A?.startDrone();
-          A?.setIntensity(0.55);
-          A?.glitch(0.15);
-          A?.dataBurst(20, 0.7);
-        });
-        gsap.delayedCall(tRain + DUR.rain * 0.42, () => A?.dataBurst(14, 0.6));
-        gsap.delayedCall(tRain + DUR.rain * 0.72, () => {
-          A?.beep(880, 0.05, 0.12);
-          A?.setIntensity(0.82);
-        });
-        gsap.delayedCall(Math.max(0.1, tRain + DUR.rain - 1.35), () => A?.sweep(1.7));
-      }
-
-      /* ─ ATTO 3 · GENESI DEL LOGO ───────────────────────────── */
-      const tConv = tRain + DUR.rain;
-      gsap.delayedCall(tConv, () => {
-        setMode('converge', DUR.converge);
-        A?.setIntensity(1);
-        A?.dataBurst(26, 0.9);
-      });
-
-      /* ─ ATTO 4 · LOGO + TAGLINE ────────────────────────────── */
-      const tReveal = tConv + DUR.converge;
-      gsap.delayedCall(tReveal - 0.16, () => {
-        A?.braam();
-        A?.setIntensity(0.35);
-      });
-      gsap.delayedCall(tReveal, () => setMode('reveal', DUR.reveal));
-      gsap.delayedCall(tReveal + 0.16, () => {
-        if (!taglineRef.current) return;
-        gsap.fromTo(
-          taglineRef.current.querySelectorAll('.tag-row'),
-          { opacity: 0, y: 26, filter: 'blur(9px)' },
-          {
-            opacity: 1, y: 0, filter: 'blur(0px)',
-            duration: 1.25, ease: 'expo.out', force3D: true, stagger: 0.14,
-          }
-        );
-      });
-
-      /* ─ ATTO 5 · USCITA ────────────────────────────────────── */
-      gsap.delayedCall(tReveal + DUR.reveal, () => exitRef.current?.());
-    }, containerRef);
-
-    return () => gsapCtx.revert();
-  }, [booting, DUR, setMode]);
+    return () => {
+      queueRef.current = [];
+      qiRef.current = 0;
+      tweensRef.current.forEach(tw => { try { tw.kill(); } catch { /* già morto */ } });
+      tweensRef.current = [];
+    };
+  }, [booting, DUR, setMode, track]);
 
   return (
     <div
@@ -1976,6 +2348,8 @@ export default function Preloader({ onComplete }) {
 
       {/* Scena canvas — viva già dietro il gate */}
       <GhostScene
+        clockRef={clockRef}
+        onFrameRef={onFrameRef}
         modeRef={modeRef}
         pointerRef={pointerRef}
         flareRef={flareRef}
@@ -2145,20 +2519,21 @@ export default function Preloader({ onComplete }) {
         }
 
         /* ── FX: scanline CRT ─────────────────────────────────
-           Gradiente ripetuto su layer FISSO e pointer-events:none:
-           nessun repaint durante lo scroll, nessun filtro applicato
-           a contenuto scrollabile.                              */
+           Bande scure in source-over normale. NIENTE mix-blend-mode:
+           un blend a schermo intero sopra un canvas che cambia ogni
+           frame obbliga la GPU a ri-comporre il backdrop 60 volte al
+           secondo — su mobile è il singolo effetto più costoso di
+           tutta la scena. Su fondo nero il risultato è identico.   */
         .fx-scan {
           position: absolute; inset: 0;
           background: repeating-linear-gradient(
             0deg,
             rgba(0,0,0,0) 0px,
             rgba(0,0,0,0) 2px,
-            rgba(0,0,0,0.30) 3px,
+            rgba(0,0,0,0.34) 3px,
             rgba(0,0,0,0) 4px
           );
-          opacity: 0.55;
-          mix-blend-mode: multiply;
+          opacity: 0.5;
         }
 
         /* ── FX: grana analogica (SVG feTurbulence inline) ──── */
