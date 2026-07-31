@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  browserconfig.xml — https://sebamox.dev
+
+  Controls how the site looks when pinned to the Windows Start menu / taskbar
+  (Edge Legacy and Internet Explorer 11). Modern Chromium Edge uses
+  site.webmanifest instead, so this file is a compatibility layer only.
+
+  Auto-discovered at /browserconfig.xml — no <meta> tag is required. Its only
+  practical effect today is preventing the 404 that Windows otherwise logs
+  when a user pins the site, and giving that tile the correct brand colour
+  instead of a system default.
+
+  TileColor matches <meta name="theme-color" content="#0f0a06"> in index.html.
+-->
+<browserconfig>
+  <msapplication>
+    <tile>
+      <square150x150logo src="/mstile-150x150.png"/>
+      <TileColor>#0f0a06</TileColor>
+    </tile>
+  </msapplication>
+</browserconfig>

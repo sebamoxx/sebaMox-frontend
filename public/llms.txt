@@ -1,0 +1,70 @@
+# SEBAMOX — Sebastiano Mollo
+
+> Portfolio of Sebastiano Mollo (brand: SEBAMOX), Creative Developer and Frontend
+> Engineer, Computer Engineering student. Custom premium websites, interactive
+> web experiences, and full-stack architectures built from scratch — no templates.
+
+Sebamox is the personal portfolio and studio site of Sebastiano Mollo. It presents
+production client work alongside low-level engineering case studies: a 2D game
+engine written in C, a CPU-only software 3D rasterizer, a WebAssembly optimization
+algorithm targeting 1980s hardware, and premium React front-ends with GSAP and
+Canvas-driven scroll sequences.
+
+The site is written in Italian (`it-IT`). It is a React single-page application
+with statically pre-rendered `<head>` metadata for every route, so crawlers that
+do not execute JavaScript still receive correct titles, descriptions, and images.
+
+## Main pages
+
+- [Home](https://sebamox.dev/): Overview of services, technology stack, process, pricing tiers, and FAQ.
+- [Archivio Progetti / Works](https://sebamox.dev/works): Full project archive — six case studies spanning interactive front-end, full-stack, graphics, and systems programming.
+- [Contatti / Contact](https://sebamox.dev/contact): Project enquiry page and direct contact channels.
+
+## Projects
+
+- [villaKoi](https://sebamox.dev/projects/VillaKoi): Full-stack Zen-inspired web experience. React front-end with GSAP ScrollTrigger, Python/FastAPI backend.
+- [Forge Engine](https://sebamox.dev/projects/c-game-engine): 2D platformer game engine written from scratch in pure C, with Raylib as the only dependency.
+- [Software 3D Engine](https://sebamox.dev/projects/software-3d-engine): CPU-only 3D rendering engine in pure C — perspective projection, matrix math, and rasterization without a GPU.
+- [ZX Spectrum AI Engine](https://sebamox.dev/projects/zx-spectrum): Stochastic optimization algorithm in native C compiled to WebAssembly, pushed against 1980s hardware limits.
+- [Aurora Skeletonized](https://sebamox.dev/projects/aeon-camera): Haute horlogerie scroll experience — a 240-frame Canvas sequence scrubbed frame-by-frame against scroll position.
+
+## Services
+
+- Custom websites — bespoke front-end architecture, zero templates
+- E-commerce — friction-free checkout, conversion-oriented UX
+- Landing pages — brief to live in 48h
+- Web apps & SaaS — dashboards and client portals
+- Brand identity — logotype, palette, typography, digital-first
+- Technical SEO & Core Web Vitals — Lighthouse scores above 90
+
+## Technologies
+
+- **Front-end:** React 19, JavaScript, TypeScript, Next.js, Vite, Tailwind CSS, CSS/SCSS
+- **Animation & 3D:** GSAP (ScrollTrigger), Three.js, React Three Fiber, WebGL, GLSL, Spline, Lenis, Framer Motion, Matter.js, Canvas 2D
+- **Back-end:** Python, FastAPI, Node.js, PostgreSQL, REST APIs
+- **Systems & low-level:** C, C++, SDL2, Raylib, WebAssembly, MATLAB
+- **Infrastructure:** Vercel, static pre-rendering, Vercel Analytics
+
+## Topics
+
+- Creative development and interactive web experiences
+- Frontend engineering and UI engineering
+- Scroll-driven animation and Canvas frame sequences
+- Real-time 3D on the web and custom rendering engines
+- Full-stack architecture with Python and React
+- Web performance, Core Web Vitals, and technical SEO
+- Game engine and graphics programming in C
+- Computer engineering studies and systems programming
+
+## Contact
+
+- Email: sebamoxdev@gmail.com
+- LinkedIn: https://linkedin.com/in/sebastiano-mollo
+- GitHub: https://github.com/sebamoxx
+- Instagram: https://instagram.com/seba.mollo
+
+## Optional
+
+- [Extended documentation](https://sebamox.dev/llms-full.txt): Full site description, mission, philosophy, navigation map, and content hierarchy for AI systems.
+- [Sitemap](https://sebamox.dev/sitemap.xml): Machine-readable list of all indexable URLs.
+- [humans.txt](https://sebamox.dev/humans.txt): Authorship and build credits.

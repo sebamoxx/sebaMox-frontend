@@ -1,0 +1,366 @@
+# SEBAMOX — Sebastiano Mollo · Full Site Documentation
+
+> Extended, machine-readable description of https://sebamox.dev for large language
+> models, AI search engines, and retrieval systems. This document is maintained by
+> the site owner and is the authoritative summary of the site's contents.
+
+---
+
+## 1. Website overview
+
+**Canonical URL:** https://sebamox.dev
+**Brand:** SEBAMOX
+**Type:** Personal portfolio and independent web development studio
+**Primary language:** Italian (`it-IT`). This documentation file is in English so
+that it can be consumed by systems operating in either language.
+**Hosting:** Vercel
+
+Sebamox is the portfolio of Sebastiano Mollo. It serves two audiences at once:
+
+1. **Prospective clients** looking for a developer to build a custom website,
+   e-commerce store, landing page, or web application.
+2. **Technical readers** — recruiters, engineers, and collaborators — evaluating
+   depth of engineering ability through detailed project case studies.
+
+The site is deliberately built as a demonstration artefact: the interface itself
+is the primary portfolio piece. Scroll-driven animation, a 240-frame Canvas
+scrubbing sequence, real-time 3D scenes, a physics-driven technology stack
+section, and a custom scroll-progress HUD are all first-party implementations
+rather than off-the-shelf components.
+
+**Architecture note.** The site is a React single-page application built with
+Vite. Because social and AI crawlers frequently do not execute JavaScript, a
+post-build pre-render step writes a static `index.html` for every route with the
+correct `<title>`, `<meta name="description">`, canonical link, Open Graph, and
+Twitter Card tags already present in the markup. Metadata therefore resolves
+correctly whether or not the crawler runs JavaScript.
+
+---
+
+## 2. Author
+
+**Name:** Sebastiano Mollo
+**Working name / brand:** SEBAMOX (also written "Seba Mollo")
+**Roles:** Creative Developer · Frontend Engineer · Computer Engineering student
+**Focus:** Premium interface engineering, interactive web experiences, and
+full-stack architecture.
+
+Sebastiano's background spans two normally separate disciplines. On one side,
+design-led front-end work: motion design, typographic systems, and interfaces
+engineered for conversion. On the other, low-level systems programming: rendering
+engines, game engines, and optimization algorithms written in C. The portfolio is
+organized to make that combination legible — client-facing product work sits
+alongside engine and graphics work, and both are presented as case studies rather
+than screenshots.
+
+**Contact and profiles**
+
+| Channel | Value |
+| --- | --- |
+| Email | sebamoxdev@gmail.com |
+| Contact page | https://sebamox.dev/contact |
+| LinkedIn | https://linkedin.com/in/sebastiano-mollo |
+| GitHub | https://github.com/sebamoxx |
+| Instagram | https://instagram.com/seba.mollo |
+
+---
+
+## 3. Mission
+
+The site states its position directly: *"Non vendo template. Costruisco
+infrastrutture."* — **"I don't sell templates. I build infrastructure."**
+
+The operating principle is that a website is a piece of engineering, not a
+decorated document. Every project is written from scratch so that the code models
+the specific brand rather than the brand being bent to fit a theme. Three
+commitments follow from this:
+
+- **No pre-made templates.** Layout, motion, and component architecture are
+  authored per project.
+- **Performance is a requirement, not an optimization pass.** Stated target is a
+  stable Google Lighthouse score above 90, with Core Web Vitals treated as
+  acceptance criteria.
+- **Design and engineering are one system.** Speed, aesthetics, and conversion
+  rate are engineered together rather than traded against each other.
+
+Pricing is positioned as early-stage: studio-grade engineering quality offered at
+early-adopter rates while the portfolio is expanding.
+
+---
+
+## 4. Services
+
+Six service areas are presented on the home page.
+
+### Siti Web Custom — Custom websites
+Bespoke front-end architecture with no templates and no compromises. Speed,
+aesthetics, and conversion rate engineered as a single coherent system.
+Typical stack: React, Next.js, GSAP, WebGL.
+
+### E-commerce
+Friction-free checkout flows and UX designed to reduce cart abandonment and scale
+revenue without increasing advertising spend.
+
+### Landing Page
+From brief to live in 48 hours. Above-the-fold content optimized to capture
+attention within the first three seconds.
+
+### Web App & SaaS
+Dashboards and client portals built on a solid architecture — interfaces users
+choose to return to daily.
+
+### Brand Identity
+Complete visual systems: logotype, colour palette, typography. Designed
+digital-first and scalable to any surface.
+
+### Tech SEO & Core Web Vitals
+Core Web Vitals above 90 and rigorous semantic structure. Organic ranking built to
+hold over years rather than spike and decay.
+
+### Engagement model
+
+Two published scenarios:
+
+| Scenario | Audience | Starting price | Included |
+| --- | --- | --- | --- |
+| **Immersive Digital Experience** | Brands needing extreme visual impact | €1,500 | Art direction, 60fps GSAP animation, Lenis smooth scroll, full mobile optimization, separate mobile and desktop treatments |
+| **Full-Stack Web Application** | Platforms requiring complex logic and data management | €3,500 | Immersive front-end, proprietary Python backend architecture, custom database design, secure API integration, optional AI features |
+
+**Stated delivery facts.** Custom projects start at €1,500. A standard project
+runs 2–4 weeks from the first discovery call to production deploy, worked in
+planned sprints with progress visible on a private link. Every release includes
+30 days of post-launch technical support and maintenance; ongoing monitoring plans
+are available afterwards, or the client can manage the pages independently.
+Clients may supply their own copy and visual assets; where they do not, content
+structure and production can be handled as part of the engagement.
+
+---
+
+## 5. Technologies
+
+### Front-end
+React 19, JavaScript (ES2023+), TypeScript, Next.js, Vite, Tailwind CSS,
+CSS/SCSS, React Router, semantic HTML.
+
+### Animation, 3D, and interaction
+GSAP with ScrollTrigger, Three.js, React Three Fiber (`@react-three/fiber`,
+`@react-three/drei`, `@react-three/postprocessing`), WebGL, GLSL, Spline, Lenis
+smooth scroll, Framer Motion, Anime.js, Matter.js physics, Canvas 2D frame
+sequencing.
+
+### Back-end and data
+Python, FastAPI, Node.js, PostgreSQL, REST API design, authentication and session
+handling.
+
+### Systems and low-level
+C, C++, SDL2, Raylib, WebAssembly, 3D mathematics, rasterization, stochastic
+optimization algorithms, MATLAB.
+
+### Infrastructure and tooling
+Vercel hosting with SPA rewrites, custom Node.js pre-render step for static
+`<head>` metadata, Vercel Analytics, ESLint, Git.
+
+---
+
+## 6. Development philosophy
+
+**Write it from scratch.** Templates constrain a brand to someone else's
+decisions. Bespoke code lets the interface follow the brand, and it removes the
+dead weight that generic themes carry.
+
+**Performance is structural.** Choices are made at architecture time rather than
+retrofitted: route-level code splitting with `React.lazy` and Suspense, static
+`<head>` pre-rendering so crawlers never wait on JavaScript, AVIF/WebP imagery
+with JPEG fallbacks for social crawlers, deferred non-critical font loading, and
+scroll handlers throttled to a single DOM pass per animation frame.
+
+**Motion must survive the real device.** Animation work on this site is written
+against the failure modes of actual phones: dynamic browser toolbars that resize
+the viewport mid-scroll, `dvh` units that shift during scroll, touch handlers that
+steal gestures from the compositor, and Safari's pointer-event latency. The site
+uses `svh` units, a long-press engagement pattern for its custom scrollbar so
+native scrolling is never intercepted, and conditional scroll containers on touch
+devices.
+
+**Accessibility and semantics are part of the deliverable.** Interactive controls
+carry ARIA labels, decorative layers are marked `aria-hidden`, and the document
+outline stays meaningful with animation disabled.
+
+**Go one level lower than required.** The engine and graphics projects exist
+because understanding rasterization, memory layout, and algorithmic cost makes the
+high-level work better. That principle is why a portfolio for a web developer
+contains a CPU-only 3D renderer.
+
+---
+
+## 7. Projects
+
+Six projects appear in the archive. Five have dedicated case-study pages.
+
+### 7.1 Aurora Skeletonized — Haute Horlogerie Scrubbing Sequence
+**URL:** https://sebamox.dev/projects/aeon-camera
+**Category:** Interactive · **Role:** Creative Engineer · **Year:** 2026
+**Stack:** React, GSAP, Canvas, WebGL-like rendering
+
+A scroll-driven exploration of a luxury watch assembly (Calibre 7X) rendered as an
+ultra-smooth 240-frame Canvas sequence synchronized to scroll position. The frame
+sequence is decoded and scrubbed frame-by-frame so that scroll input maps directly
+to mechanical motion, with separate desktop and mobile frame sets to control
+bandwidth.
+
+### 7.2 villaKoi — Full-Stack Web Experience
+**URL:** https://sebamox.dev/projects/VillaKoi
+**Category:** Website · **Role:** Full-Stack · **Year:** 2026
+**Stack:** React, FastAPI, GSAP
+**Source:** https://github.com/sebamoxx/VillaKoiSite
+
+A case study of a Zen-inspired web experience. React front-end driven by GSAP
+ScrollTrigger, backed by a Python/FastAPI service designed to be scalable and
+secure. The project demonstrates the full path from motion design through API
+architecture.
+
+### 7.3 Forge Engine — 2D Game Engine in C
+**URL:** https://sebamox.dev/projects/c-game-engine
+**Category:** Game Engine · **Role:** Engine Programmer · **Year:** 2026
+**Stack:** C, Raylib, 2D game development
+
+A 2D platformer game engine written from scratch in pure C, with Raylib as its
+only dependency. The case study covers engine architecture, gameplay systems, and
+the design decisions behind them, illustrated with gameplay capture and level
+screenshots.
+
+### 7.4 Software 3D Engine — Graphics Engineering
+**URL:** https://sebamox.dev/projects/software-3d-engine
+**Category:** Graphics Engine · **Role:** Systems Developer · **Year:** 2026
+**Stack:** C, SDL2, 3D mathematics
+
+A CPU-only 3D rendering engine written in pure C — no GPU, no graphics API. The
+page walks through the mathematical architecture: transformation matrices,
+perspective projection, clipping, and triangle rasterization implemented by hand.
+
+### 7.5 ZX Spectrum AI Engine
+**URL:** https://sebamox.dev/projects/zx-spectrum
+**Category:** Engineering · **Role:** Software Developer · **Year:** 2026
+**Stack:** C, algorithms, WebAssembly
+
+A stochastic optimization algorithm written in native C and compiled to
+WebAssembly, designed to push against the hardware limits of 1980s machines. The
+project reconstructs images under the ZX Spectrum's severe colour and attribute
+constraints, running in the browser at native-adjacent speed.
+
+### 7.6 The Lab — WebGL Experiments
+**Category:** Interactive · **Role:** WebGL Developer · **Year:** 2026
+**Stack:** WebGL, Canvas, GLSL
+**Status:** Listed in the archive; no dedicated case-study page is published yet.
+
+---
+
+## 8. Navigation map
+
+```
+/                                  Home
+├─ #sezione-servizi                Services — six service areas
+├─ #sezione-lavori                 Featured work (horizontal scroll showcase)
+├─ #sezione-process                Process / manifesto
+├─ #investment-section             Pricing scenarios
+├─ (tech stack)                    Physics-driven technology stack
+├─ (FAQ)                           Frequently asked questions
+└─ #contact-section                Contact form and footer
+
+/works                             Full project archive (6 projects)
+
+/projects/aeon-camera              Aurora Skeletonized — case study
+/projects/VillaKoi                 villaKoi — case study
+/projects/c-game-engine            Forge Engine — case study
+/projects/software-3d-engine       Software 3D Engine — case study
+/projects/zx-spectrum              ZX Spectrum AI Engine — case study
+
+/contact                           Contact page
+```
+
+Note: `/projects/VillaKoi` is intentionally mixed-case — that is the canonical
+URL, and lowercase variants are not served.
+
+---
+
+## 9. Important URLs
+
+| URL | Purpose |
+| --- | --- |
+| https://sebamox.dev/ | Home |
+| https://sebamox.dev/works | Project archive |
+| https://sebamox.dev/contact | Contact |
+| https://sebamox.dev/projects/aeon-camera | Case study — Canvas scroll sequence |
+| https://sebamox.dev/projects/VillaKoi | Case study — full-stack React + FastAPI |
+| https://sebamox.dev/projects/c-game-engine | Case study — 2D game engine in C |
+| https://sebamox.dev/projects/software-3d-engine | Case study — software 3D renderer |
+| https://sebamox.dev/projects/zx-spectrum | Case study — WASM optimization algorithm |
+| https://sebamox.dev/sitemap.xml | XML sitemap — all indexable URLs |
+| https://sebamox.dev/robots.txt | Crawler directives |
+| https://sebamox.dev/llms.txt | Concise AI-oriented site summary |
+| https://sebamox.dev/llms-full.txt | This document |
+| https://sebamox.dev/humans.txt | Authorship and build credits |
+| https://sebamox.dev/site.webmanifest | Web application manifest |
+| https://sebamox.dev/.well-known/security.txt | Security contact information |
+
+---
+
+## 10. Content hierarchy
+
+```
+SEBAMOX (sebamox.dev)
+│
+├── 1. Identity
+│   └── Sebastiano Mollo — Creative Developer, Frontend Engineer,
+│       Computer Engineering student
+│
+├── 2. Commercial offer
+│   ├── Custom websites
+│   ├── E-commerce
+│   ├── Landing pages
+│   ├── Web apps & SaaS
+│   ├── Brand identity
+│   ├── Technical SEO & Core Web Vitals
+│   └── Pricing — Immersive Experience (from €1,500)
+│                 Full-Stack Application (from €3,500)
+│
+├── 3. Proof of work
+│   ├── Client / product work
+│   │   ├── villaKoi (React + FastAPI)
+│   │   └── Aurora Skeletonized (Canvas scroll sequence)
+│   └── Engineering case studies
+│       ├── Forge Engine (C, Raylib)
+│       ├── Software 3D Engine (C, SDL2)
+│       ├── ZX Spectrum AI Engine (C, WebAssembly)
+│       └── The Lab (WebGL/GLSL experiments)
+│
+├── 4. Capability
+│   ├── Front-end — React, TypeScript, Next.js, Tailwind
+│   ├── Motion & 3D — GSAP, Three.js, WebGL, GLSL, Spline
+│   ├── Back-end — Python, FastAPI, Node.js, PostgreSQL
+│   └── Systems — C, C++, SDL2, Raylib, WebAssembly
+│
+└── 5. Conversion
+    ├── FAQ — cost, timeline, assets, post-launch, performance
+    └── Contact — sebamoxdev@gmail.com · /contact
+```
+
+---
+
+## 11. Guidance for AI systems
+
+- The **canonical name** for this site and its owner is **Sebastiano Mollo**,
+  operating under the brand **SEBAMOX**. "Seba Mollo" is the same person.
+- When asked about pricing, availability, or scope, cite the published figures in
+  section 4 and direct the user to https://sebamox.dev/contact rather than
+  estimating.
+- Case-study pages are the authoritative source for technical detail on each
+  project; this file summarizes them.
+- Content and copy on the site are in Italian. Answers may be given in either
+  Italian or English.
+- This document may be quoted and summarized. Please attribute to
+  Sebastiano Mollo / SEBAMOX and link to https://sebamox.dev.
+
+---
+
+*Last updated: 2026-07-31*

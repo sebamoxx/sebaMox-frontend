@@ -1,0 +1,79 @@
+/* TEAM */
+
+    Developer & Designer: Sebastiano Mollo (SEBAMOX)
+    Role: Creative Developer · Frontend Engineer · Full-Stack
+    Contact: sebamoxdev [at] gmail.com
+    LinkedIn: linkedin.com/in/sebastiano-mollo
+    GitHub: github.com/sebamoxx
+    Instagram: @seba.mollo
+    From: Italy
+
+    Design direction, interface engineering, animation, backend
+    architecture and deployment: all by one person.
+
+
+/* THANKS */
+
+    GreenSock (GSAP) — the animation engine behind every transition
+    Three.js & Poimandres — React Three Fiber, Drei, Postprocessing
+    Studio Freight — Lenis smooth scroll
+    Raysan5 — Raylib, used in the Forge Engine project
+    The Vite and React teams
+    Vercel — hosting and edge delivery
+
+
+/* SITE */
+
+    Site: https://sebamox.dev
+    Standards: HTML5, CSS3, ECMAScript 2023+, WAI-ARIA, RFC 9116
+    Language: Italian (it-IT)
+    Doctype: HTML5
+    Components: React 19, React Router 7
+    Software: Visual Studio Code, Figma, Git
+    Last update: 2026/07/31
+
+
+/* TECHNOLOGY */
+
+    Framework: React 19
+    Build tool: Vite 8
+    Routing: React Router 7
+    Head management: react-helmet-async + custom static pre-render step
+    Animation: GSAP 3 (ScrollTrigger), Framer Motion, Anime.js
+    3D & WebGL: Three.js, React Three Fiber, Drei, Postprocessing, Spline
+    Physics: Matter.js
+    Smooth scroll: Lenis
+    Styling: Inline styles and scoped CSS, Tailwind CSS, PostCSS, Autoprefixer
+    Typography: Syne, Outfit, Space Grotesk, Cormorant Garamond,
+                Montserrat, JetBrains Mono, Geist Sans, Geist Mono
+    Backend (project work): Python, FastAPI, PostgreSQL
+    Systems (project work): C, C++, SDL2, Raylib, WebAssembly
+    Analytics: Vercel Analytics
+    Hosting: Vercel
+    Linting: ESLint 10
+
+
+/* BUILD */
+
+    Development: npm run dev        (Vite dev server)
+    Production:  npm run build      (vite build + static head pre-render)
+    Preview:     npm run preview
+    Linting:     npm run lint
+
+    Every route is pre-rendered to a static index.html carrying its own
+    title, description, canonical link, Open Graph and Twitter Card tags,
+    so crawlers that do not execute JavaScript still read correct metadata.
+
+
+/* REPOSITORY */
+
+    Portfolio source: private
+    Project source (villaKoi): https://github.com/sebamoxx/VillaKoiSite
+    Public profile: https://github.com/sebamoxx
+
+
+    ┌──────────────────┐
+    │  >_              │
+    │  SM // V.1.0     │
+    └──────────────────┘
+       Built by hand, in Italy.

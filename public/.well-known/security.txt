@@ -1,0 +1,54 @@
+# ============================================================================
+# security.txt — https://sebamox.dev
+# Standard: RFC 9116 (https://www.rfc-editor.org/rfc/rfc9116)
+#
+# Canonical location: /.well-known/security.txt
+# Purpose: tell a security researcher who found a vulnerability exactly where
+# to report it, instead of leaving them to guess or publish it publicly.
+#
+# ----------------------------------------------------------------------------
+# MAINTENANCE — fields to review
+# ----------------------------------------------------------------------------
+# Expires        REQUIRED by RFC 9116. This file is considered STALE and
+#                should be ignored by tooling after this date. Push the date
+#                forward at least once a year. Current value: 2027-07-31.
+# Contact        Replace with a dedicated address (e.g. security@sebamox.dev)
+#                once the custom domain has mailboxes configured. Until then
+#                the general contact address below is the working channel.
+# Encryption     OPTIONAL. Add the URL of a public PGP key if you want
+#                encrypted reports. Leave commented out if you have no key —
+#                pointing at a nonexistent key is worse than omitting it.
+# Policy         OPTIONAL. Add once a written disclosure policy page exists.
+# Acknowledgments OPTIONAL. Add once there is a page crediting reporters.
+# ============================================================================
+
+# --- Where to send a vulnerability report (in order of preference) ---
+Contact: mailto:sebamoxdev@gmail.com
+Contact: https://sebamox.dev/contact
+
+# --- How long this file stays valid (RFC 9116 §2.5.5, required) ---
+Expires: 2027-07-31T23:59:59.000Z
+
+# --- The one authoritative location of this file ---
+Canonical: https://sebamox.dev/.well-known/security.txt
+
+# --- Languages a report can be written in ---
+Preferred-Languages: it, en
+
+# ----------------------------------------------------------------------------
+# Optional fields — uncomment and fill in when the corresponding resource
+# actually exists. An unreachable URL here reduces the file's credibility.
+# ----------------------------------------------------------------------------
+# Encryption: https://sebamox.dev/.well-known/pgp-key.txt
+# Policy: https://sebamox.dev/security-policy
+# Acknowledgments: https://sebamox.dev/security-acknowledgments
+# Hiring: https://sebamox.dev/contact
+
+# ----------------------------------------------------------------------------
+# NOTE ON SCOPE
+# sebamox.dev is a statically hosted portfolio served from Vercel. It holds no
+# user accounts and no personal data beyond what is voluntarily sent through
+# the contact form. Reports concerning the site itself, its deployment, or its
+# DNS configuration are welcome. Please allow a reasonable window for a fix
+# before public disclosure.
+# ----------------------------------------------------------------------------

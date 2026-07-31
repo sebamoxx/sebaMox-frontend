@@ -2,8 +2,20 @@
 # robots.txt — https://sebamox.dev
 # Portfolio React (Vite) + pre-rendering statico per crawler
 # ===================================================================
+#
+# NOTA SUL FUNZIONAMENTO DEI GRUPPI (importante se modifichi il file):
+# un crawler obbedisce a UN SOLO gruppo — quello con lo User-agent più
+# specifico che corrisponde al suo nome — e IGNORA completamente gli
+# altri, incluso "*". Per questo le regole di protezione qui sotto sono
+# RIPETUTE in ogni gruppo: se le lasciassi solo in "*", i bot nominati
+# esplicitamente più in basso crawlerebbero anche /api/ e /admin/.
+# ===================================================================
 
-# --- Regola globale: vale per ogni bot conforme ---
+
+# ═══════════════════════════════════════════════════════════════════
+# GRUPPO 1 — Regola globale: vale per ogni bot conforme
+# (Googlebot, Bingbot, DuckDuckBot, Applebot, Yandex, social crawler…)
+# ═══════════════════════════════════════════════════════════════════
 User-agent: *
 
 # 1) Blindatura backend Python — niente JSON/dati grezzi nelle SERP
@@ -30,5 +42,89 @@ Allow: /*.svg$
 Allow: /*.avif$
 Allow: /*.webp$
 
-# --- Sitemap (URL assoluto) ---
+# 4) File di identità e metadata del sito — sempre leggibili
+Allow: /llms.txt
+Allow: /llms-full.txt
+Allow: /humans.txt
+Allow: /site.webmanifest
+Allow: /browserconfig.xml
+Allow: /.well-known/
+
+
+# ═══════════════════════════════════════════════════════════════════
+# GRUPPO 2 — CRAWLER AI / LLM: ACCESSO CONSENTITO
+# ───────────────────────────────────────────────────────────────────
+# Scelta deliberata: il sito VUOLE essere trovato, citato e linkato da
+# ChatGPT, Claude, Perplexity, Gemini e simili. Per un portfolio la
+# citazione in una risposta AI è un canale di acquisizione, non una
+# perdita — quindi questi bot ricevono lo stesso accesso di Google,
+# con le identiche protezioni sul backend.
+#
+# PER REVOCARE IL CONSENSO (es. se in futuro non vuoi più che i
+# contenuti vengano usati per l'addestramento): sostituisci
+# "Allow: /" con "Disallow: /" in questo gruppo. Vale solo per i bot
+# che rispettano robots.txt — non è un blocco tecnico.
+#
+# Due token qui sotto sono SOLO opt-out e non appartengono a un
+# crawler reale: Google-Extended (usa i contenuti già raccolti da
+# Googlebot per Gemini / AI Overviews) e Applebot-Extended (idem per
+# Apple Intelligence). Elencarli con "Allow: /" documenta il consenso
+# esplicito; per negarlo basta un "Disallow: /".
+# ═══════════════════════════════════════════════════════════════════
+
+# — OpenAI —
+User-agent: GPTBot
+User-agent: OAI-SearchBot
+User-agent: ChatGPT-User
+# — Anthropic —
+User-agent: ClaudeBot
+User-agent: Claude-User
+User-agent: Claude-SearchBot
+User-agent: anthropic-ai
+# — Perplexity —
+User-agent: PerplexityBot
+User-agent: Perplexity-User
+# — Google / Apple (token di consenso, vedi nota sopra) —
+User-agent: Google-Extended
+User-agent: Applebot-Extended
+# — Altri assistenti e indici —
+User-agent: Meta-ExternalAgent
+User-agent: Meta-ExternalFetcher
+User-agent: Amazonbot
+User-agent: DuckAssistBot
+User-agent: MistralAI-User
+User-agent: cohere-ai
+User-agent: YouBot
+User-agent: CCBot
+
+Allow: /
+Allow: /llms.txt
+Allow: /llms-full.txt
+
+# Stesse protezioni del gruppo globale — vanno ripetute, vedi nota in testa
+Disallow: /api/
+Disallow: /auth/
+Disallow: /admin/
+Disallow: /config/
+Disallow: /webhook/
+Disallow: /webhooks/
+Disallow: /internal/
+Disallow: /.env
+Disallow: /*.json$
+Disallow: /temp/
+Disallow: /*?*
+
+
+# ═══════════════════════════════════════════════════════════════════
+# RISORSE PER I CRAWLER
+# ───────────────────────────────────────────────────────────────────
+# Sitemap è una direttiva standard e indipendente dai gruppi.
+# I due file llms.* non sono uno standard formale e NON vengono letti
+# automaticamente da robots.txt: sono elencati qui per riferimento
+# umano e raggiungibili direttamente ai loro URL.
+#
+#   https://sebamox.dev/llms.txt        — sintesi del sito per LLM
+#   https://sebamox.dev/llms-full.txt   — documentazione estesa
+# ═══════════════════════════════════════════════════════════════════
+
 Sitemap: https://sebamox.dev/sitemap.xml

@@ -1,0 +1,71 @@
+{
+  "id": "/",
+  "name": "SEBAMOX — Sebastiano Mollo | Creative Developer",
+  "short_name": "SEBAMOX",
+  "description": "Portfolio di Sebastiano Mollo: siti web premium su misura, esperienze interattive, animazioni GSAP e architetture full-stack con React e Python.",
+  "lang": "it-IT",
+  "dir": "ltr",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["standalone", "minimal-ui", "browser"],
+  "background_color": "#030201",
+  "theme_color": "#0f0a06",
+  "categories": ["business", "design", "developer"],
+  "icons": [
+    {
+      "src": "/favicon.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/apple-touch-icon.png",
+      "sizes": "180x180",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "/images/anteprimaSito.jpg",
+      "sizes": "1920x838",
+      "type": "image/jpeg",
+      "form_factor": "wide",
+      "label": "Home page — hero e direzione artistica"
+    },
+    {
+      "src": "/images/contactImage.jpg",
+      "sizes": "1535x1024",
+      "type": "image/jpeg",
+      "form_factor": "wide",
+      "label": "Pagina contatti"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Archivio Progetti",
+      "short_name": "Progetti",
+      "description": "Tutti i case study: interfacce premium, motori 3D e progetti full-stack",
+      "url": "/works"
+    },
+    {
+      "name": "Contattami",
+      "short_name": "Contatti",
+      "description": "Inizia un progetto o richiedi un preventivo",
+      "url": "/contact"
+    }
+  ]
+}
